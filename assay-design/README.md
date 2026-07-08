@@ -1,8 +1,8 @@
-# assay-design — clade-specific ortholog discovery
+# assay-design: clade-specific ortholog discovery
 
 Companion tool to [primeval](../README.md). `assay-design` parses a
 [Panaroo](https://gtonkinhill.github.io/panaroo/) pangenome to find orthologs
-that are **conserved within** a clade and **specific to** it (absent from the
+that are **conserved within** a clade and **specific to** the clade (absent from the
 rest of the dataset), then extracts representative protein and nucleotide
 sequences. These clade-specific genes are the candidate targets from which the
 Vpop dPCR assays were designed; the resulting amplicons are then validated with
@@ -11,18 +11,20 @@ primeval.
 ## Workflow
 
 ```
-Panaroo output ──▶ Stage 1: identify conserved & specific orthologs ──▶ Stage 2: extract representative sequences
-                   (parse_group_specific_orthologs.py)                   (extract_proteins.py)
+Panaroo output ──▶ 
+Stage 1: identify conserved & specific orthologs (parse_group_specific_orthologs.py) ──▶ 
+Stage 2: extract representative sequences (extract_proteins.py)
 ```
 
 Both stages are wrapped by `run_pipeline.py`.
 
 ## Environment
 
-Uses the repository's single top-level environment — no separate install:
+Uses primeval's single top-level environment, so no separate install is required:
 
 ```bash
-conda env create -f ../environment.yaml   # if not already created
+cd primeval
+conda env create -f environment.yaml   # if not already created
 conda activate primeval
 ```
 
@@ -31,11 +33,11 @@ that environment).
 
 ## Inputs
 
-| Input | Format |
-|-------|--------|
-| **Presence/absence matrix** (`--matrix`) | Panaroo `gene_presence_absence` (`.csv` or `.tsv`). Metadata columns (`Gene`, `Annotation`, …) are detected automatically; all other columns are treated as genomes. Each cell holds the locus ID for that genome (empty = gene absent). |
-| **Inclusion groups** (`--isolates-dir`) | A directory of `.txt` files, one per group. Each file lists the genome names (one per line) that make up that inclusion group. Names must match matrix column headers. The filename stem names the group in all outputs. |
-| **Gene data** (`--gene-data`) | Panaroo `gene_data.csv` with columns `gff_file`, `annotation_id`, `prot_sequence`, `dna_sequence`, `gene_name`, `description`. Only needed for Stage 2. |
+| Input                                     | Format                                                                                                                                                                                                                                                       |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Presence/absence matrix** (`--matrix`)  | Panaroo `gene_presence_absence_roary` output (`.csv` or `.tsv`). Metadata columns (`Gene`, `Annotation`, …) are detected automatically; all other columns are treated as genomes. Each cell holds the locus ID for that genome (empty = gene absent).        |
+| **Inclusion groups** (`--isolates-dir`)   | A directory of `.txt` files, one per group. Each file lists the genome names (one per line) that make up that inclusion group. Names must match matrix column headers. The filename stem names the group in all outputs.                                     |
+| **Gene data** (`--gene-data`)             | Panaroo `gene_data.csv` with columns `gff_file`, `annotation_id`, `prot_sequence`, `dna_sequence`, `gene_name`, `description`. Only needed for Stage 2.                                                                                                      |
 | **Representatives** (`--representatives`) | TSV with columns `group_stem` and `representative_assembly`. Chooses which genome's sequences are extracted per group. `group_stem` must match an inclusion-group filename stem; `representative_assembly` must be a matrix column. Only needed for Stage 2. |
 
 For a given group, the **exclusion set** is every genome column in the matrix
@@ -98,17 +100,15 @@ Per inclusion group:
 
 - **Conserved** — present in **≥ 90%** of the group's inclusion genomes. Requiring
   near-universal (rather than strictly universal) presence tolerates draft-genome
-  incompleteness and occasional annotation/clustering dropout, while still
-  demanding the gene be a stable feature of the clade — a prerequisite for a
-  sensitive assay.
+  incompleteness and occasional annotation/clustering dropout. At the same time, it ensures the gene is a stable feature of the clade, a prerequisite for a sensitive assay.
 - **Specific** — conserved **and** present in **≤ 10%** of the exclusion genomes
   (i.e. `1 − threshold`). Allowing a small exclusion fraction absorbs rare
-  horizontal gene transfer and annotation noise without letting genuinely shared
-  genes through — a prerequisite for a specific assay.
+  horizontal gene transfer and annotation noise without letting commonly shared
+  genes through, a prerequisite for a specific assay.
 
 Set `--threshold 1.0` for the strict definition (present in every inclusion
 genome, absent from every exclusion genome). Values below ~0.8 are not
-recommended: they admit orthologs too patchy to make reliable assay targets.
+recommended: we find they admit orthologs too patchy to make reliable assay targets.
 
 **`--min-match-rate` (default 0.5)** is a Stage 2 safety guard. Sequences are
 extracted by matching each conserved ortholog's representative locus ID against
@@ -121,6 +121,6 @@ completeness.
 ## Note on functional annotation
 
 Downstream functional annotation of the extracted proteins (e.g. with
-[EggNOG-mapper](http://eggnog-mapper.embl.de/)) is outside the scope of this
-tool. The `.faa` files produced by Stage 2 are directly usable as input to such
-tools if desired.
+[EggNOG-mapper](http://eggnog-mapper.embl.de/)) is outside the scope of this tool, but was useful for determining which
+candidate gene targets to consider in developing the Vpop assay suite. The `.faa` files 
+produced by Stage 2 are directly usable as input to EggNOG-mapper if desired.
