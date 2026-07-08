@@ -1,0 +1,25 @@
+name: primeval
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11.*
+  # Pipeline (Tool 1)
+  - blast=2.16.*
+  - snakemake-minimal=8.30.*
+  - snakemake-executor-plugin-slurm=1.4.*
+  - ncbi-datasets-cli=18.*   # `datasets` CLI, used by the assembly download helpers
+  - biopython=1.87.*
+  - seaborn=0.13.*
+  - matplotlib=3.11.*
+  - openpyxl=3.1.*
+  # Shared (both tools)
+  - pandas=3.0.*
+  - numpy
+  # Testing
+  - pytest=9.1.*
+  # Install the primeval CLI onto PATH (editable, from the repo root)
+  - pip
+  - pip:
+      - --editable .

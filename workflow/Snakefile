@@ -1,0 +1,38 @@
+from pathlib import Path
+
+# Config is supplied on the command line (primeval CLI passes --configfile;
+# direct snakemake users pass --configfile config/config.yaml). No hardcoded
+# configfile: directive, so the workflow parses from any working directory.
+
+# Directory containing this Snakefile's scripts, resolved independently of cwd.
+SCRIPTS = Path(workflow.basedir) / "scripts"
+
+# Discover assemblies once at DAG-build time
+ACCESSIONS = glob_wildcards(config["assembly_dir"] + "/{accession}.fna").accession
+RESULTS = config["results_dir"]
+
+# Raw BLAST TSVs are intermediate. By default they are wrapped in temp() so
+# Snakemake deletes each once run_ispcr consumes it. Set keep_blast: true to
+# retain them.
+KEEP_BLAST = config.get("keep_blast", False)
+
+
+def blast_output(path):
+    return path if KEEP_BLAST else temp(path)
+
+
+rule all:
+    input:
+        RESULTS + "/reports/species_summary.csv",
+        RESULTS + "/reports/assay_summary.csv",
+        RESULTS + "/reports/assay_summary.xlsx",
+        RESULTS + "/reports/detection_matrix.xlsx",
+        RESULTS + "/reports/run_manifest.txt",
+        RESULTS + "/reports/figures/heatmap_binary.pdf",
+        RESULTS + "/reports/figures/heatmap_verbose.pdf",
+
+
+include: "rules/prepare.smk"
+include: "rules/blast.smk"
+include: "rules/ispcr.smk"
+include: "rules/report.smk"

@@ -1,0 +1,4 @@
+cores: 8
+# Runs inside the activated `primeval` conda environment
+# (conda env create -f environment.yaml && conda activate primeval).
+use-conda: false

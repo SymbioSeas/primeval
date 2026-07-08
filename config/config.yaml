@@ -1,0 +1,33 @@
+# ── Paths ─────────────────────────────────────────────────────────────────────
+# assay_table: CSV defining the assays to evaluate (see README for column spec)
+assay_table: "assay_table.csv"
+
+# assembly_dir: directory containing input genome assemblies (.fna files)
+assembly_dir: "assemblies"
+
+# metadata: CSV produced by the NCBI download helper scripts (see scripts/download/)
+metadata: "assemblies/metadata.csv"
+
+# results_dir: all pipeline outputs are written here
+results_dir: "results"
+
+# ── Detection thresholds ───────────────────────────────────────────────────────
+# Rationale: a primer carrying a single internal (mid-sequence) mismatch still
+# primes efficiently, whereas mismatches at the 3' terminus abolish polymerase
+# extension. We therefore tolerate a small number of internal mismatches while
+# requiring the 3' end to match exactly. See README ("Detection thresholds").
+max_primer_mismatches: 2       # per primer, IUPAC-aware; tolerant of internal SNPs, excludes poor binders
+prime3_exact_nt: 3             # 3'-terminal bases must match exactly (extension-critical region)
+max_probe_mismatches: 1        # probe-based assays only; probes tolerate less mismatch than primers
+max_amplicon_size: 500         # bp; well above typical qPCR/ddPCR amplicons (~70-200 bp), rejects spurious long products
+
+# ── Output options ─────────────────────────────────────────────────────────────
+store_amplicon_sequences: false  # true = store per-amplicon FASTA sequence in outputs
+keep_blast: false                # true = retain raw BLAST TSVs (large); false = delete after use
+
+# ── BLAST parameters ───────────────────────────────────────────────────────────
+# These are intentionally permissive; stringency is enforced downstream
+# by the mismatch and coverage filters in the detection engine.
+blast_evalue: 1000
+blast_perc_identity: 70
+blast_word_size: 7             # tuned for short oligo queries (<50 nt)
