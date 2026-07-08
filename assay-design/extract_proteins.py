@@ -99,12 +99,12 @@ def process_dataset(
     ]:
         if not path.exists():
             print(f"  ERROR: {label} not found: {path}", file=sys.stderr)
-            return
+            return 0
 
     representatives = load_representatives(representatives_path)
     if not representatives:
         print(f"  ERROR: no entries in {representatives_path}", file=sys.stderr)
-        return
+        return 0
 
     conserved_files = sorted(orthologs_dir.glob("*_conserved_orthologs.tsv"))
     if not conserved_files:
@@ -113,7 +113,7 @@ def process_dataset(
             f"  Run Stage 1 (parse_group_specific_orthologs.py) first.",
             file=sys.stderr,
         )
-        return
+        return 0
 
     # Pre-filter gene_data to only the representative assemblies needed,
     # avoiding loading the full (potentially multi-GB) file into memory.
@@ -126,8 +126,20 @@ def process_dataset(
         dtype=str,
         low_memory=False,
     )
+    available_gff = sorted(gene_data["gff_file"].dropna().unique())
     gene_data = gene_data[gene_data["gff_file"].isin(needed_assemblies)].copy()
     print(f"  {len(gene_data)} gene_data rows for {len(needed_assemblies)} representative assemblies")
+
+    if gene_data.empty:
+        sample = ", ".join(available_gff[:5]) if available_gff else "(none)"
+        print(
+            f"  ERROR: none of the representative names {sorted(needed_assemblies)} match a "
+            f"'gff_file' value in {gene_data_path.name}.\n"
+            f"  representative_assembly must be a genome name (a 'gff_file' in gene_data, "
+            f"which is also a matrix column) — not a file path or .faa filename.\n"
+            f"  Valid genome names include: {sample}",
+            file=sys.stderr,
+        )
 
     # Build lookup: annotation_id → row (for fast access)
     gene_lookup = gene_data.set_index("annotation_id")
@@ -146,9 +158,15 @@ def process_dataset(
         conserved_df = pd.read_csv(conserved_file, sep="\t", dtype=str)
 
         if rep_assembly not in conserved_df.columns:
+            hint = ""
+            if "/" in rep_assembly or rep_assembly.endswith((".faa", ".fna", ".fasta")):
+                hint = " (this looks like a file path or filename — use the genome name instead)"
+            sample = ", ".join(list(conserved_df.columns)[-3:])
             print(
-                f"  SKIP [{group_stem}]: representative '{rep_assembly}' "
-                f"is not a column in {conserved_file.name}"
+                f"  SKIP [{group_stem}]: representative '{rep_assembly}' is not a genome "
+                f"column in {conserved_file.name}{hint}. It must be a genome name matching a "
+                f"matrix column, e.g. one of: {sample}",
+                file=sys.stderr,
             )
             continue
 
@@ -219,6 +237,8 @@ def process_dataset(
             "  No output files written. If all groups were skipped due to low match rate,\n"
             "  check that gene_data annotation_ids match locus IDs in the PA matrix."
         )
+
+    return n_written
 
 
 def main():

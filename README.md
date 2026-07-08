@@ -11,6 +11,9 @@
 
 Both tools share the single conda environment defined in `environment.yaml`.
 
+Once installed (below), each tool has a command on your PATH: **`primeval`**
+(pipeline) and **`assay-design`** (companion). Run either with `--help`.
+
 ## Features
 
 - Evaluates primer and probe binding across a user-provided set of genome assemblies
@@ -30,6 +33,27 @@ Both tools share the single conda environment defined in `environment.yaml`.
 conda install -c conda-forge ncbi-datasets-cli
 ```
 
+## System requirements
+
+Disk and memory scale with the number and size of input assemblies. Estimates
+below are from the manuscript's *Vibrionaceae* runs (RefSeq assemblies average
+~5 MB each). Raw BLAST output is the dominant transient cost; with the default
+`keep_blast: false` it is deleted as the run proceeds.
+
+| Component | Per assembly | Draft set (10,715) | Complete set (927) |
+|-----------|-------------|--------------------|--------------------|
+| Input assemblies (`.fna`) | ~5 MB | 49 GB | 4.3 GB |
+| Cached BLAST DBs (`resources/blast_db/`) | ~1.3 MB | 14 GB | ~1.2 GB |
+| Raw BLAST output (transient) | ~15 MB | 158 GB | ~14 GB |
+| Reports + amplicons | — | ~0.2 GB | small |
+| **Peak disk (`keep_blast: false`)** | | **~65 GB** | **~6 GB** |
+| **Peak disk (`keep_blast: true`)** | | **~220 GB** | **~20 GB** |
+| **Peak RAM** | | **~16 GB** | **~16 GB** |
+
+Rule of thumb: budget roughly **6–7 MB of transient disk per assembly** with
+`keep_blast: false`, or ~21 MB per assembly if retaining raw BLAST, plus ~16 GB
+RAM for the final aggregation step.
+
 ## Installation
 
 ```bash
@@ -40,7 +64,10 @@ conda activate primeval
 ```
 
 The pipeline runs inside this activated environment; the Snakemake profiles set
-`use-conda: false` so no per-rule environments are built.
+`use-conda: false` so no per-rule environments are built. Creating the
+environment also installs both the **`primeval`** and **`assay-design`** commands
+onto your PATH. If you created the environment before this step existed, run
+`pip install --editable .` from the repo root with the environment active.
 
 ## Quick start
 
@@ -56,7 +83,13 @@ This downloads all RefSeq assemblies (complete through contig level) for the spe
 
 ### 2. Configure the pipeline
 
-Edit `config/config.yaml` to point at your assemblies and set detection thresholds:
+Copy the config template into your analysis directory (the folder holding your
+`assemblies/`, where results will be written) and edit the copy to point at your
+assemblies and set detection thresholds:
+
+```bash
+cp /path/to/primeval/config/config.yaml ./config.yaml
+```
 
 ```yaml
 assembly_dir: "assemblies"          # directory containing .fna files
@@ -76,12 +109,37 @@ Create a CSV file named `assay_table.csv` with one row per assay (see [Assay tab
 
 ### 4. Run
 
-```bash
-# Local (8 cores)
-snakemake --profile workflow/profiles/local
+`primeval` is installed on your PATH (see [Installation](#installation)). Run it
+from any analysis directory containing your `assemblies/` and a `config.yaml`:
 
-# SLURM cluster
-snakemake --profile workflow/profiles/slurm
+```bash
+primeval --run-name Vpop
+```
+
+Results are written to `results/Vpop_<date>/` (`amplicons/`, `blast/`,
+`reports/`, and `run.log`). Options:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--run-name NAME` | `results` | Names the results directory: `results/<NAME>_<date>/`. |
+| `--directory DIR` | current dir | Analysis directory (assemblies, config, outputs). |
+| `--configfile FILE` | `<dir>/config.yaml` | Pipeline configuration. |
+| `--force` | off | Reuse today's `<NAME>_<date>/` and resume unfinished work. |
+| `--cores N` | 8 | CPU cores. |
+
+Re-running the same name on the same day without `--force` creates
+`<NAME>_<date>_2`, `_3`, … so previous results are never overwritten. Anything
+after `--` is passed straight to Snakemake (e.g. `primeval --run-name Vpop -- -n`
+for a dry run). Set `keep_blast: true` in `config.yaml` to retain the raw
+per-assembly BLAST output (see [System requirements](#system-requirements)).
+
+**Advanced (direct Snakemake / SLURM):** invoke the workflow directly, passing the
+config explicitly:
+
+```bash
+snakemake --configfile config/config.yaml --profile workflow/profiles/local \
+  --config results_dir=results/Vpop_manual
+# SLURM: swap in --profile workflow/profiles/slurm
 ```
 
 ---
@@ -254,13 +312,38 @@ assembly_dir: "test_data/assemblies"
 metadata: "test_data/assemblies/metadata.csv"
 ```
 
-And run:
+And run from the repo root (using the repo's config directly):
 
 ```bash
-snakemake --profile workflow/profiles/local
+primeval --run-name test --configfile config/config.yaml
 ```
 
 The test dataset covers all detection scenarios: `Detected` (including via minus-strand primer binding), `Primer Only`, and `Not Detected`.
+
+---
+
+## assay-design — clade-specific target discovery
+
+**assay-design** is the companion tool used to *design* the assays that primeval
+validates. It parses a [Panaroo](https://gtonkinhill.github.io/panaroo/)
+pangenome to find orthologs that are conserved within a clade and specific to it
+(absent elsewhere), then extracts representative protein/nucleotide sequences —
+the candidate targets from which the Vpop dPCR assays were built.
+
+It installs its own command, `assay-design`, on your PATH:
+
+```bash
+assay-design \
+    --matrix          gene_presence_absence.csv \
+    --isolates-dir    isolate_groups \
+    --gene-data       gene_data.csv \
+    --representatives representatives.tsv \
+    --output-dir      results
+```
+
+A tiny, ready-to-run worked example lives in
+[`assay-design/example/`](assay-design/example/). For inputs, thresholds, and
+full usage, see the [assay-design README](assay-design/README.md).
 
 ---
 

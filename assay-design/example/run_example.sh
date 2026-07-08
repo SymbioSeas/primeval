@@ -3,9 +3,8 @@
 # From the example/ directory:  bash run_example.sh
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ASSAY_DESIGN_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-python3 "${ASSAY_DESIGN_DIR}/run_pipeline.py" \
+assay-design \
     --matrix          "${SCRIPT_DIR}/example_gene_presence_absence.csv" \
     --isolates-dir    "${SCRIPT_DIR}/isolate_groups" \
     --gene-data       "${SCRIPT_DIR}/gene_data.csv" \

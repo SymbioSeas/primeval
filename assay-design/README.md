@@ -16,7 +16,7 @@ Stage 1: identify conserved & specific orthologs (parse_group_specific_orthologs
 Stage 2: extract representative sequences (extract_proteins.py)
 ```
 
-Both stages are wrapped by `run_pipeline.py`.
+Both stages are wrapped by the `assay-design` command.
 
 ## Environment
 
@@ -28,8 +28,9 @@ conda env create -f environment.yaml   # if not already created
 conda activate primeval
 ```
 
-Only `python`, `pandas`, and `numpy` are needed for this tool (all included in
-that environment).
+Activating this environment puts both the `primeval` and `assay-design` commands
+on your PATH. Only `python`, `pandas`, and `numpy` are needed for this tool (all
+included in that environment).
 
 ## Inputs
 
@@ -37,18 +38,40 @@ that environment).
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Presence/absence matrix** (`--matrix`)  | Panaroo `gene_presence_absence_roary` output (`.csv` or `.tsv`). Metadata columns (`Gene`, `Annotation`, …) are detected automatically; all other columns are treated as genomes. Each cell holds the locus ID for that genome (empty = gene absent).        |
 | **Inclusion groups** (`--isolates-dir`)   | A directory of `.txt` files, one per group. Each file lists the genome names (one per line) that make up that inclusion group. Names must match matrix column headers. The filename stem names the group in all outputs.                                     |
-| **Gene data** (`--gene-data`)             | Panaroo `gene_data.csv` with columns `gff_file`, `annotation_id`, `prot_sequence`, `dna_sequence`, `gene_name`, `description`. Only needed for Stage 2.                                                                                                      |
-| **Representatives** (`--representatives`) | TSV with columns `group_stem` and `representative_assembly`. Chooses which genome's sequences are extracted per group. `group_stem` must match an inclusion-group filename stem; `representative_assembly` must be a matrix column. Only needed for Stage 2. |
+| **Gene data** (`--gene-data`)             | Panaroo `gene_data.csv` with columns `gff_file`, `annotation_id`, `prot_sequence`, `dna_sequence`, `gene_name`, `description`. **All extracted sequences come from this file** — assay-design does not read separate per-genome FASTA (`.faa`) files. Only needed for Stage 2. |
+| **Representatives** (`--representatives`) | Tab-separated file with a header row `group_stem` and `representative_assembly`, then one row per group. `group_stem` must match an inclusion-group filename stem. `representative_assembly` is a **genome name** — it must match a matrix column header **and** a `gene_data` `gff_file` value exactly (it is *not* a file path or `.faa` filename). Only needed for Stage 2. |
 
 For a given group, the **exclusion set** is every genome column in the matrix
 that is not in that group.
 
+### How the identifiers connect
+
+The same genome names appear in four places and must match exactly:
+
+- column headers in the presence/absence matrix,
+- `gff_file` values in `gene_data.csv`,
+- lines in each inclusion-group `.txt` file, and
+- the `representative_assembly` column of `representatives.tsv`.
+
+So a `representatives.tsv` for a group `Lbrevis_Vjas` whose representative genome
+is `LB14LO7` is:
+
+```
+group_stem	representative_assembly
+Lbrevis_Vjas	LB14LO7
+```
+
+(tab-separated). Use the genome name `LB14LO7`, **not** a path like
+`.../Lbrevis_faa/LB14LO7.faa`. Stage 2 then pulls that genome's protein and
+nucleotide sequences for each ortholog directly from `gene_data.csv`.
+
 ## Usage
 
-Run both stages on one dataset:
+Run both stages on one dataset with the `assay-design` command (installed on your
+PATH by the primeval conda environment):
 
 ```bash
-python run_pipeline.py \
+assay-design \
     --matrix          gene_presence_absence.csv \
     --isolates-dir    isolate_groups \
     --gene-data       gene_data.csv \
