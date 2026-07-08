@@ -24,6 +24,22 @@ def test_cli_main_runs_example_and_prints_header(tmp_path, capsys):
     assert "Done. Outputs in" in printed
 
 
+def test_cli_writes_specific_sequences(tmp_path):
+    out = tmp_path / "out"
+    rc = adc.main([
+        "--matrix", str(EXAMPLE / "example_gene_presence_absence.csv"),
+        "--isolates-dir", str(EXAMPLE / "isolate_groups"),
+        "--gene-data", str(EXAMPLE / "gene_data.csv"),
+        "--representatives", str(EXAMPLE / "representatives.tsv"),
+        "--output-dir", str(out),
+    ])
+    assert rc == 0
+    assert any(f.stat().st_size > 0 for f in out.glob("*_specific_proteins.faa")), \
+        "no non-empty specific protein FASTA"
+    assert any(f.stat().st_size > 0 for f in out.glob("*_specific_genes.fna")), \
+        "no non-empty specific gene FASTA"
+
+
 def test_cli_returns_nonzero_when_no_sequences_extracted(tmp_path):
     out = tmp_path / "out"
     bad_reps = tmp_path / "bad_reps.tsv"

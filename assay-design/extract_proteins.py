@@ -78,6 +78,64 @@ def write_fasta(records: list, out_path: pathlib.Path) -> None:
                 f.write(seq[i : i + 60] + "\n")
 
 
+def _extract_sequences(df, rep_assembly, gene_lookup, orthologs_dir, group_stem,
+                       category, min_match_rate):
+    """Write representative protein/nucleotide FASTAs for one group and category
+    ("conserved" or "specific"). Returns True if files were written.
+
+    `df` is the already-loaded orthologs table (conserved or specific); the
+    representative column is assumed validated by the caller.
+    """
+    if rep_assembly not in df.columns:
+        return False
+
+    rep_loci = df[rep_assembly].dropna().tolist()
+    if not rep_loci:
+        print(f"  SKIP [{group_stem} / {category}]: representative '{rep_assembly}' "
+              f"has no non-empty locus IDs")
+        return False
+
+    matched_ids = [lid for lid in rep_loci if lid in gene_lookup.index]
+    match_rate = len(matched_ids) / len(rep_loci)
+    if match_rate < min_match_rate:
+        print(
+            f"  SKIP [{group_stem} / {category}]: {len(matched_ids)}/{len(rep_loci)} locus IDs "
+            f"({match_rate:.0%}) matched in gene_data for '{rep_assembly}' — "
+            f"annotation ID format likely differs from PA matrix",
+            file=sys.stderr,
+        )
+        return False
+
+    n_missing = len(rep_loci) - len(matched_ids)
+    if n_missing:
+        print(f"  NOTE [{group_stem} / {category}]: {n_missing}/{len(rep_loci)} locus IDs "
+              f"not found in gene_data (likely Panaroo refound genes — excluded from output)")
+
+    prot_records, dna_records = [], []
+    for locus_id in matched_ids:
+        row = gene_lookup.loc[locus_id]
+        # gene_lookup.loc may return a DataFrame if annotation_id is duplicated
+        if isinstance(row, pd.DataFrame):
+            row = row.iloc[0]
+        desc = build_header_desc(row.get("gene_name"), row.get("description"))
+        prot_seq = str(row.get("prot_sequence", ""))
+        dna_seq = str(row.get("dna_sequence", ""))
+        if prot_seq and prot_seq != "nan":
+            prot_records.append((locus_id, desc, prot_seq))
+        if dna_seq and dna_seq != "nan":
+            dna_records.append((locus_id, desc, dna_seq))
+
+    faa_file = orthologs_dir / f"{group_stem}_{category}_proteins.faa"
+    fna_file = orthologs_dir / f"{group_stem}_{category}_genes.fna"
+    write_fasta(prot_records, faa_file)
+    write_fasta(dna_records, fna_file)
+    print(
+        f"  [{group_stem} / {category}]: {len(prot_records)} proteins / {len(dna_records)} genes "
+        f"from '{rep_assembly}' ({match_rate:.0%} match) → {faa_file.name}, {fna_file.name}"
+    )
+    return True
+
+
 def process_dataset(
     orthologs_dir,
     gene_data_path,
@@ -170,67 +228,21 @@ def process_dataset(
             )
             continue
 
-        # Locus IDs from representative column (NaN = gene absent in rep at this threshold)
-        rep_loci = conserved_df[rep_assembly].dropna().tolist()
-        if not rep_loci:
-            print(
-                f"  SKIP [{group_stem}]: representative '{rep_assembly}' "
-                f"has no non-empty locus IDs in {conserved_file.name}"
-            )
-            continue
+        # Extract representative sequences for the conserved orthologs …
+        if _extract_sequences(conserved_df, rep_assembly, gene_lookup, orthologs_dir,
+                              group_stem, "conserved", min_match_rate):
+            n_written += 1
 
-        # Match annotation_ids
-        loci_set = set(rep_loci)
-        matched_ids = [lid for lid in rep_loci if lid in gene_lookup.index]
-        match_rate = len(matched_ids) / len(rep_loci)
-
-        if match_rate < min_match_rate:
-            print(
-                f"  SKIP [{group_stem}]: {len(matched_ids)}/{len(rep_loci)} locus IDs "
-                f"({match_rate:.0%}) matched in gene_data for '{rep_assembly}' — "
-                f"annotation ID format likely differs from PA matrix",
-                file=sys.stderr,
-            )
-            continue
-
-        n_missing = len(rep_loci) - len(matched_ids)
-        if n_missing:
-            print(
-                f"  NOTE [{group_stem}]: {n_missing}/{len(rep_loci)} locus IDs not found "
-                f"in gene_data (likely Panaroo refound genes — excluded from output)"
-            )
-
-        # Build FASTA records preserving PA matrix locus ID order
-        prot_records = []
-        dna_records = []
-
-        for locus_id in matched_ids:
-            row = gene_lookup.loc[locus_id]
-            # gene_lookup.loc may return a DataFrame if annotation_id is duplicated
-            if isinstance(row, pd.DataFrame):
-                row = row.iloc[0]
-
-            desc = build_header_desc(row.get("gene_name"), row.get("description"))
-            prot_seq = str(row.get("prot_sequence", ""))
-            dna_seq = str(row.get("dna_sequence", ""))
-
-            if prot_seq and prot_seq != "nan":
-                prot_records.append((locus_id, desc, prot_seq))
-            if dna_seq and dna_seq != "nan":
-                dna_records.append((locus_id, desc, dna_seq))
-
-        faa_file = orthologs_dir / f"{group_stem}_conserved_proteins.faa"
-        fna_file = orthologs_dir / f"{group_stem}_conserved_genes.fna"
-
-        write_fasta(prot_records, faa_file)
-        write_fasta(dna_records, fna_file)
-        n_written += 1
-
-        print(
-            f"  [{group_stem}]: {len(prot_records)} proteins / {len(dna_records)} genes "
-            f"from '{rep_assembly}' ({match_rate:.0%} match) "
-            f"→ {faa_file.name}, {fna_file.name}"
-        )
+        # … and for the group-specific subset (the clade-specific candidate targets).
+        specific_file = orthologs_dir / f"{group_stem}_specific_orthologs.tsv"
+        if specific_file.exists():
+            specific_df = pd.read_csv(specific_file, sep="\t", dtype=str)
+            if _extract_sequences(specific_df, rep_assembly, gene_lookup, orthologs_dir,
+                                  group_stem, "specific", min_match_rate):
+                n_written += 1
+        else:
+            print(f"  NOTE [{group_stem}]: no {specific_file.name} found; "
+                  f"skipping specific-ortholog extraction")
 
     if n_written == 0:
         print(

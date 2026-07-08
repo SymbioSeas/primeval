@@ -50,6 +50,7 @@ def _print_footer(output_dir, skip_stage2):
     print("  <group>_conserved_orthologs.tsv, <group>_specific_orthologs.tsv")
     if not skip_stage2:
         print("  <group>_conserved_proteins.faa, <group>_conserved_genes.fna")
+        print("  <group>_specific_proteins.faa, <group>_specific_genes.fna")
 
 
 def main(argv=None):

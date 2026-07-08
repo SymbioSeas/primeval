@@ -34,12 +34,13 @@ For each of the 3 groups:
 |------|----------|
 | `<group>_conserved_orthologs.tsv` | Orthogroups present in ≥90% of the group's genomes, with inclusion/exclusion coverage metrics. |
 | `<group>_specific_orthologs.tsv` | The conserved subset also absent from ≥90% of the exclusion genomes (clade-specific candidates). |
-| `<group>_conserved_proteins.faa` | Representative protein sequences for the conserved orthologs. |
-| `<group>_conserved_genes.fna` | Representative nucleotide sequences for the conserved orthologs. |
+| `<group>_conserved_proteins.faa` / `<group>_conserved_genes.fna` | Representative protein / nucleotide sequences for the conserved orthologs. |
+| `<group>_specific_proteins.faa` / `<group>_specific_genes.fna` | Representative protein / nucleotide sequences for the group-specific orthologs (the clade-specific candidate targets). |
 
 With the shipped data you should see roughly: `Vmed_pathogenic` 37 conserved /
 12 specific, `Vmed_protective` 47 / 17, `Vmed_intermediate-avirulent` 30 / 4,
-and non-empty `.faa`/`.fna` files (representative match rate 97–100%).
+and non-empty conserved and specific `.faa`/`.fna` files (representative match
+rate 92–100%).
 
 To run the tool on your own Panaroo output, see the
 [assay-design README](../README.md).

@@ -114,8 +114,14 @@ Per inclusion group:
 |------|----------|
 | `<group>_conserved_orthologs.tsv` | Orthogroups conserved in the group, with inclusion/exclusion coverage metrics (`n_/frac_inclusion_present`, `n_/frac_exclusion_present`, `exclusion_assemblies_present`). |
 | `<group>_specific_orthologs.tsv` | The conserved subset that is also specific to the group (clade-specific candidates). |
-| `<group>_conserved_proteins.faa` | Representative protein sequences (Stage 2). |
-| `<group>_conserved_genes.fna` | Representative nucleotide sequences (Stage 2). |
+| `<group>_conserved_proteins.faa` | Representative protein sequences for the conserved orthologs (Stage 2). |
+| `<group>_conserved_genes.fna` | Representative nucleotide sequences for the conserved orthologs (Stage 2). |
+| `<group>_specific_proteins.faa` | Representative protein sequences for the group-specific orthologs — the clade-specific candidate targets (Stage 2). |
+| `<group>_specific_genes.fna` | Representative nucleotide sequences for the group-specific orthologs (Stage 2). |
+
+The `specific` FASTAs are the subset of the `conserved` FASTAs whose orthologs
+are also absent from the exclusion genomes; they are the most direct
+candidate-target set for assay design.
 
 ## Thresholds and rationale
 
