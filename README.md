@@ -6,13 +6,13 @@
 
 | Tool                         | Location                                    | Purpose                                                                                                                                                                                                                                               |
 | ---------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **primeval** (pipeline)      | repository root (`workflow/`, `config/`, …) | Validate PCR assays in silico against a set of genome assemblies.                                                                                                                                                                                     |
-| **assay-design** (companion) | [`assay-design/`](assay-design/)            | Identify clade-conserved / clade-specific orthologs from a Panaroo pangenome and extract representative sequences. This is the candidate-gene discovery step used to develop the Vpop assays. See [`assay-design/README.md`](assay-design/README.md). |
+| **primeval**      | repository root (`workflow/`, `config/`, …) | Validate PCR assays in silico against a set of genome assemblies.                                                                                                                                                                                     |
+| **assay-design** | [`assay-design/`](assay-design/)            | Identify clade-conserved / clade-specific orthologs from a Panaroo pangenome and extract representative sequences. This is the candidate-gene discovery step used to develop the Vpop assays. See [`assay-design/README.md`](assay-design/README.md). |
 
 Both tools share the single conda environment defined in `environment.yaml`.
 
 Once installed (below), each tool has a command on your PATH: **`primeval`**
-(pipeline) and **`assay-design`** (companion). Run either with `--help`.
+and **`assay-design`**. Run either with `--help`.
 
 ## Features
 
@@ -66,8 +66,7 @@ conda activate primeval
 The pipeline runs inside this activated environment; the Snakemake profiles set
 `use-conda: false` so no per-rule environments are built. Creating the
 environment also installs both the **`primeval`** and **`assay-design`** commands
-onto your PATH. If you created the environment before this step existed, run
-`pip install --editable .` from the repo root with the environment active.
+onto your PATH.
 
 ## Quick start
 
@@ -110,7 +109,7 @@ Create a CSV file named `assay_table.csv` with one row per assay (see [Assay tab
 ### 4. Run
 
 `primeval` is installed on your PATH (see [Installation](#installation)). Run it
-from any analysis directory containing your `assemblies/` and a `config.yaml`:
+from any analysis directory containing your `assemblies/` directory and an updated `config.yaml` file:
 
 ```bash
 primeval --run-name Vpop
