@@ -12,6 +12,7 @@ dependencies = []
 [project.scripts]
 primeval = "primeval.cli:main"
 assay-design = "assay_design.cli:main"
+download-assemblies = "primeval.download_cli:main"
 
 [tool.setuptools]
 packages = ["primeval", "assay_design"]

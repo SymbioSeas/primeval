@@ -10,7 +10,8 @@
 #   - parse_metadata.py in the same directory as this script
 #
 # Usage:
-#   bash download_assemblies.sh [OPTIONS]
+#   download-assemblies [OPTIONS]        (installed command; runs from any directory)
+#   bash download_assemblies.sh [OPTIONS]  (equivalent, if running the script directly)
 #
 # Options:
 #   -t TAXON       Taxon name or NCBI taxon ID (required). Repeatable: pass -t
@@ -28,8 +29,8 @@
 # config/ncbi_credentials.sh and paste your key. This script sources it on every
 # run. Key precedence: -k flag > NCBI_API_KEY env var > credentials file.
 #
-# On HPC/SLURM: wrap this script in an sbatch job. Example:
-#   sbatch --time=24:00:00 --mem=8G --wrap="bash download_assemblies.sh -t Vibrionaceae -o assemblies"
+# On HPC/SLURM: wrap the command in an sbatch job. Example:
+#   sbatch --time=24:00:00 --mem=8G --wrap="download-assemblies -t Vibrionaceae -o assemblies"
 #
 # Output:
 #   OUTDIR/*.fna          — one FASTA file per assembly (multi-replicon genomes concatenated)
@@ -61,7 +62,12 @@ API_KEY="${_ENV_API_KEY:-${NCBI_API_KEY:-}}"
 
 # ── Argument parsing ───────────────────────────────────────────────────────────
 usage() {
-    sed -n '/^# Usage:/,/^[^#]/{ /^#/{ s/^# \{0,1\}//; p } }' "$0"
+    # Print the header comment block from "# Usage:" to the first non-comment
+    # line, stripping the leading "# ". awk is used (not GNU-sed block syntax)
+    # so this works with the BSD sed/awk shipped on macOS.
+    awk '/^# Usage:/{p=1}
+         p && /^[^#]/{exit}
+         p{sub(/^# ?/, ""); print}' "$0"
     exit 1
 }
 

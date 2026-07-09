@@ -65,17 +65,19 @@ conda activate primeval
 
 The pipeline runs inside this activated environment; the Snakemake profiles set
 `use-conda: false` so no per-rule environments are built. Creating the
-environment also installs both the **`primeval`** and **`assay-design`** commands
-onto your PATH.
+environment also installs three commands onto your PATH — **`primeval`** (the
+pipeline), **`assay-design`** (the companion tool), and **`download-assemblies`**
+(the assembly-download helper) — each runnable from any directory.
 
 ## Quick start
 
 ### 1. Download assemblies
 
-Use the provided helper script to download RefSeq assemblies for your taxon of interest:
+Use the `download-assemblies` command (installed with the environment; runnable
+from any directory) to download RefSeq assemblies for your taxon of interest:
 
 ```bash
-bash scripts/download/download_assemblies.sh -t "Vibrionaceae" -o assemblies/
+download-assemblies -t "Vibrionaceae" -o assemblies/
 ```
 
 This downloads all RefSeq assemblies (complete through contig level) for the specified taxon and writes a `metadata.csv` to the output directory. See [Downloading assemblies](#downloading-assemblies) for options and HPC usage.
@@ -217,10 +219,15 @@ results/
 
 ## Downloading assemblies
 
+`download-assemblies` is installed with the environment and runs from any
+directory. (Equivalently, you can run the script directly with
+`bash /path/to/primeval/scripts/download/download_assemblies.sh …` — the command
+is just a thin wrapper around it.)
+
 ### Basic usage
 
 ```bash
-bash scripts/download/download_assemblies.sh -t "Taxon name" -o assemblies/
+download-assemblies -t "Taxon name" -o assemblies/
 ```
 
 Options:
@@ -239,7 +246,7 @@ Pass `-t` more than once to download the **de-duplicated union** of several taxa
 into a single output directory:
 
 ```bash
-bash scripts/download/download_assemblies.sh \
+download-assemblies \
     -t "Vibrio jasicida" \
     -t "Vibrio owensii" \
     -o assemblies/
@@ -259,7 +266,7 @@ cp config/ncbi_credentials.example.sh config/ncbi_credentials.sh
 # edit config/ncbi_credentials.sh and paste your key into NCBI_API_KEY
 ```
 
-`download_assemblies.sh` sources this file automatically on every run.
+`download-assemblies` sources this file automatically on every run.
 To keep the key elsewhere, point `PRIMEVAL_CREDENTIALS` at your own file.
 
 The key is resolved as: **`-k` flag → `NCBI_API_KEY` environment variable →
@@ -269,14 +276,14 @@ credentials file** (first one set wins).
 
 Local available storage requirements for primeval are directly scaled by the assembly dataset provided (i.e., you need space to store the downloaded assemblies you provide primeval!). If needed, primeval runs can easily be submitted in a SLURM environment using the wrapper below.
 
-Wrap the script in an sbatch job for large downloads:
+Wrap the command in an sbatch job for large downloads:
 
 ```bash
 sbatch --time=24:00:00 --mem=8G \
-  --wrap="bash scripts/download/download_assemblies.sh -t Vibrionaceae -o assemblies/"
+  --wrap="download-assemblies -t Vibrionaceae -o assemblies/"
 ```
 
-The script is resume-aware: if interrupted, re-running it will skip assemblies already successfully downloaded.
+`download-assemblies` is resume-aware: if interrupted, re-running it will skip assemblies already successfully downloaded.
 
 ---
 
