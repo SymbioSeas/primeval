@@ -2,7 +2,6 @@ import csv
 import hashlib
 import subprocess
 import argparse
-import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
@@ -35,6 +34,13 @@ DETECTION_CALL_ORDER = ['Detected', 'Primer Only', 'Not Detected']
 SPECIES_SUMMARY_COLS = [
     'species_group', 'assay', 'n_assemblies', 'n_detected',
     'n_primer_only', 'n_not_detected', 'pct_detected', 'pct_detected_or_primer',
+    'n_multi_amplicon', 'max_amplicons',
+]
+
+ASSAY_SUMMARY_LONG_COLS = [
+    'assay', 'species_group', 'n_assemblies', 'n_detected', 'n_primer_only',
+    'n_not_detected', 'pct_detected', 'pct_detected_or_primer',
+    'n_multi_amplicon', 'max_amplicons',
 ]
 
 
@@ -59,8 +65,7 @@ def _effective_species(row) -> str:
 
 def load_detection_results(amplicons_dir: str) -> pd.DataFrame:
     """Load per-assembly detection CSVs from a directory, skipping amplicons and empty files."""
-    paths = [p for p in Path(amplicons_dir).glob('*.csv')
-             if not p.name.endswith('_amplicons.csv') and p.stat().st_size > 0]
+    paths = [p for p in Path(amplicons_dir).glob('*.csv') if p.stat().st_size > 0]
     if not paths:
         return pd.DataFrame(columns=DETECTION_COLS)
     return pd.concat([pd.read_csv(p) for p in paths], ignore_index=True)
@@ -93,6 +98,7 @@ def build_species_summary(joined: pd.DataFrame) -> pd.DataFrame:
         n_det = (grp['detection_call'] == 'Detected').sum()
         n_po = (grp['detection_call'] == 'Primer Only').sum()
         n_nd = (grp['detection_call'] == 'Not Detected').sum()
+        namp = pd.to_numeric(grp['n_amplicons'], errors='coerce').fillna(0)
         rows.append({
             'species_group': species,
             'assay': assay,
@@ -102,28 +108,36 @@ def build_species_summary(joined: pd.DataFrame) -> pd.DataFrame:
             'n_not_detected': int(n_nd),
             'pct_detected': round(100 * n_det / n, 2) if n > 0 else 0.0,
             'pct_detected_or_primer': round(100 * (n_det + n_po) / n, 2) if n > 0 else 0.0,
+            'n_multi_amplicon': int((namp > 1).sum()),
+            'max_amplicons': int(namp.max()) if len(namp) else 0,
         })
     return pd.DataFrame(rows, columns=SPECIES_SUMMARY_COLS)
 
 
-def build_assay_summary(species_summary: pd.DataFrame, min_pct_detected: float = 1.0) -> pd.DataFrame:
-    """Return assay × species_group rows where pct_detected > min_pct_detected.
-
-    Columns: assay, species_group, pct_detected, n_detected, n_assemblies.
-    Sorted by assay, then pct_detected descending.
-    """
-    df = species_summary[species_summary['pct_detected'] > min_pct_detected].copy()
-    df = df[['assay', 'species_group', 'pct_detected', 'n_detected', 'n_assemblies']]
+def build_assay_summary_long(species_summary: pd.DataFrame) -> pd.DataFrame:
+    """Per assay × species_group, ALL species groups (including pct_detected=0),
+    sorted by assay then pct_detected descending."""
+    if species_summary.empty:
+        return pd.DataFrame(columns=ASSAY_SUMMARY_LONG_COLS)
+    df = species_summary[ASSAY_SUMMARY_LONG_COLS].copy()
     return df.sort_values(['assay', 'pct_detected'], ascending=[True, False]).reset_index(drop=True)
 
 
-def build_detection_matrix(joined: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Return (binary_matrix, verbose_matrix).
-    Rows = accessions, columns = assays.
-    Binary: 1=Detected, 0=Not Detected or Primer Only.
-    Verbose: raw detection_call string.
-    """
+def build_species_matrix(species_summary: pd.DataFrame) -> pd.DataFrame:
+    """Wide species × assay matrix of pct_detected with a leading n_assemblies column.
+    Rows = species_group (as a column after reset), columns = assays."""
+    if species_summary.empty:
+        return pd.DataFrame(columns=['species_group', 'n_assemblies'])
+    n_assemblies = species_summary.groupby('species_group')['n_assemblies'].first()
+    matrix = species_summary.pivot_table(
+        index='species_group', columns='assay', values='pct_detected', aggfunc='first'
+    )
+    matrix.insert(0, 'n_assemblies', n_assemblies)
+    return matrix.reset_index()
+
+
+def build_detection_matrix(joined: pd.DataFrame) -> pd.DataFrame:
+    """Binary detection matrix: rows=accession, cols=assay, 1=Detected else 0."""
     dups = joined.duplicated(subset=['accession', 'assay'])
     if dups.any():
         raise ValueError(
@@ -133,45 +147,34 @@ def build_detection_matrix(joined: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataF
     verbose = joined.pivot_table(
         index='accession', columns='assay', values='detection_call', aggfunc='first'
     )
-    binary = verbose.map(lambda x: 1 if x == 'Detected' else 0)
-    return binary, verbose
+    return verbose.map(lambda x: 1 if x == 'Detected' else 0)
 
 
-def write_heatmaps(binary: pd.DataFrame, verbose: pd.DataFrame, figures_dir: str) -> None:
-    """Write binary and verbose heatmaps as PDF + PNG."""
+def build_detection_by_assembly(binary: pd.DataFrame, meta: pd.DataFrame) -> pd.DataFrame:
+    """One row per analyzed accession: all metadata columns + one 0/1 column per assay."""
+    return meta.merge(binary.reset_index(), on='accession', how='right')
+
+
+def write_species_heatmap(species_matrix: pd.DataFrame, figures_dir: str) -> None:
+    """Species × assay heatmap colored by pct_detected (0-100)."""
     Path(figures_dir).mkdir(parents=True, exist_ok=True)
-
-    # Binary heatmap
-    fig, ax = plt.subplots(figsize=(max(6, len(binary.columns)), max(4, len(binary) * 0.15)))
-    sns.heatmap(binary, ax=ax, cmap=['#d9534f', '#5cb85c'], vmin=0, vmax=1,
-                linewidths=0.5, linecolor='white', cbar=False,
-                xticklabels=True, yticklabels=True)
-    ax.set_title('Detection Matrix (Binary)')
+    if species_matrix.empty:
+        return
+    mat = species_matrix.set_index('species_group').drop(columns=['n_assemblies'], errors='ignore')
+    if mat.empty:
+        return
+    annotate = mat.shape[0] * mat.shape[1] <= 300
+    fig, ax = plt.subplots(figsize=(max(6, len(mat.columns)), max(4, len(mat) * 0.4)))
+    sns.heatmap(mat, ax=ax, cmap='viridis', vmin=0, vmax=100,
+                linewidths=0.5, linecolor='white',
+                annot=annotate, fmt='.0f',
+                cbar_kws={'label': '% detected'})
+    ax.set_title('Species detection (% of assemblies detected)')
     ax.set_xlabel('Assay')
-    ax.set_ylabel('Assembly')
+    ax.set_ylabel('Species group')
     plt.tight_layout()
     for ext in ('pdf', 'png'):
-        fig.savefig(f"{figures_dir}/heatmap_binary.{ext}", dpi=150)
-    plt.close(fig)
-
-    # Verbose heatmap — encode as numbers for coloring
-    call_map = {'Detected': 2, 'Primer Only': 1, 'Not Detected': 0}
-    known_calls = set(call_map.keys())
-    unexpected = set(verbose.values.flatten()) - known_calls - {np.nan, None}
-    if unexpected:
-        import warnings
-        warnings.warn(f"Unexpected detection_call values in heatmap: {unexpected}")
-    verbose_num = verbose.map(lambda x: call_map.get(x, 0))
-    fig, ax = plt.subplots(figsize=(max(6, len(verbose.columns)), max(4, len(verbose) * 0.15)))
-    sns.heatmap(verbose_num, ax=ax, cmap=['#d9534f', '#f0ad4e', '#5cb85c'],
-                vmin=0, vmax=2, linewidths=0.5, linecolor='white', cbar=False,
-                xticklabels=True, yticklabels=True)
-    ax.set_title('Detection Matrix (Verbose)')
-    ax.set_xlabel('Assay')
-    ax.set_ylabel('Assembly')
-    plt.tight_layout()
-    for ext in ('pdf', 'png'):
-        fig.savefig(f"{figures_dir}/heatmap_verbose.{ext}", dpi=150)
+        fig.savefig(f"{figures_dir}/species_detection_heatmap.{ext}", dpi=150)
     plt.close(fig)
 
 
@@ -224,6 +227,8 @@ def main():
     p.add_argument('--max-amplicon-size', type=int, default=500)
     p.add_argument('--store-amplicon-sequences',
                    type=lambda x: x.lower() == 'true', default=True)
+    p.add_argument('--keep-blast', type=lambda x: x.lower() == 'true', default=False)
+    p.add_argument('--keep-logs', type=lambda x: x.lower() == 'true', default=False)
     args = p.parse_args()
 
     reports = Path(args.reports_dir)
@@ -245,25 +250,23 @@ def main():
         ).sort_values('_call_order')[PER_ASSAY_COLS]
         sorted_grp.to_csv(per_assay / f"{assay}_results.csv", index=False)
 
-    # Species summary
-    summary = build_species_summary(joined)
-    summary.to_csv(reports / 'species_summary.csv', index=False)
+    # Species summary — wide species × assay matrix of pct_detected
+    species_summary = build_species_summary(joined)
+    build_species_matrix(species_summary).to_csv(reports / 'species_summary.csv', index=False)
 
-    # Assay summary — species_groups with pct_detected > 1, one row per assay × species_group
-    assay_summary = build_assay_summary(summary)
-    assay_summary.to_csv(reports / 'assay_summary.csv', index=False)
+    # Assay summary (long) — one row per assay × species_group, all groups incl. misses
+    assay_long = build_assay_summary_long(species_summary)
+    assay_long.to_csv(reports / 'assay_summary_long.csv', index=False)
     with pd.ExcelWriter(reports / 'assay_summary.xlsx', engine='openpyxl') as writer:
-        for assay, grp in assay_summary.groupby('assay'):
-            grp.to_excel(writer, sheet_name=assay, index=False)
+        for assay, grp in assay_long.groupby('assay'):
+            grp.to_excel(writer, sheet_name=str(assay)[:31], index=False)
 
-    # Detection matrix
-    binary, verbose = build_detection_matrix(joined)
-    with pd.ExcelWriter(reports / 'detection_matrix.xlsx', engine='openpyxl') as writer:
-        binary.to_excel(writer, sheet_name='Binary')
-        verbose.to_excel(writer, sheet_name='Verbose')
+    # Per-assembly detection joined with input metadata
+    binary = build_detection_matrix(joined)
+    build_detection_by_assembly(binary, meta).to_csv(reports / 'detection_by_assembly.csv', index=False)
 
-    # Heatmaps
-    write_heatmaps(binary, verbose, str(figures))
+    # Species-level heatmap
+    write_species_heatmap(build_species_matrix(species_summary), str(figures))
 
     # Run manifest
     params = {
@@ -272,6 +275,8 @@ def main():
         'max_probe_mismatches': args.max_probe_mismatches,
         'max_amplicon_size': args.max_amplicon_size,
         'store_amplicon_sequences': args.store_amplicon_sequences,
+        'keep_blast': args.keep_blast,
+        'keep_logs': args.keep_logs,
     }
     write_run_manifest(str(reports / 'run_manifest.txt'), params, args.assay_table)
 

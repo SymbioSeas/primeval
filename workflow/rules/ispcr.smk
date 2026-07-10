@@ -5,7 +5,6 @@ rule run_ispcr:
         assay_table=config["assay_table"],
     output:
         detection=config["results_dir"] + "/amplicons/{accession}.csv",
-        amplicons=config["results_dir"] + "/amplicons/{accession}_amplicons.csv",
     params:
         max_primer_mismatches=config["max_primer_mismatches"],
         prime3_exact_nt=config["prime3_exact_nt"],
@@ -25,6 +24,5 @@ rule run_ispcr:
             --max-probe-mismatches {params.max_probe_mismatches} \
             --max-amplicon-size {params.max_amplicon_size} \
             --store-amplicon-sequences {params.store_amplicon_sequences} \
-            --detection-out "{output.detection}" \
-            --amplicons-out "{output.amplicons}"
+            --detection-out "{output.detection}"
         """

@@ -9,23 +9,25 @@ from summarize import (
     load_detection_results,
     join_metadata,
     build_species_summary,
-    build_assay_summary,
+    build_species_matrix,
+    build_assay_summary_long,
     build_detection_matrix,
-    write_heatmaps,
+    build_detection_by_assembly,
+    write_species_heatmap,
     write_run_manifest,
 )
 
 
 # --- Fixtures ---
 
-def make_detection_df(accessions, assays, call='Detected'):
+def make_detection_df(accessions, assays, call='Detected', n_amplicons=1):
     """Build a minimal detection DataFrame (like output of run_ispcr)."""
     rows = []
     for acc in accessions:
         for assay in assays:
             rows.append({
                 'accession': acc, 'assay': assay, 'detection_call': call,
-                'n_amplicons': 1, 'multi_amplicon_flag': False,
+                'n_amplicons': n_amplicons, 'multi_amplicon_flag': n_amplicons > 1,
                 'amplicon_sizes': '150', 'contig_ids': 'c1',
                 'fwd_mismatches': 0, 'rev_mismatches': 0,
                 'probe_mismatches': 0, 'probe_strand': '+',
@@ -80,22 +82,6 @@ def test_load_detection_results_skips_empty_files(tmp_path):
     assert combined.iloc[0]['accession'] == 'GCF_001'
 
 
-def test_load_detection_results_skips_amplicons_csv(tmp_path):
-    """Files ending in _amplicons.csv are not loaded as detection results."""
-    det = make_detection_df(['GCF_001'], ['VhPath'])
-    det.to_csv(tmp_path / "GCF_001.csv", index=False)
-    # Simulate amplicons file with extra rows for same assay
-    amp = pd.DataFrame([
-        {'accession': 'GCF_001', 'assay': 'VhPath', 'contig_id': 'c1',
-         'amplicon_start': 100, 'amplicon_end': 300, 'amplicon_size': 201},
-        {'accession': 'GCF_001', 'assay': 'VhPath', 'contig_id': 'c1',
-         'amplicon_start': 500, 'amplicon_end': 700, 'amplicon_size': 201},
-    ])
-    amp.to_csv(tmp_path / "GCF_001_amplicons.csv", index=False)
-    combined = load_detection_results(str(tmp_path))
-    assert len(combined) == 1  # only the detection row, not 3 rows
-
-
 # --- join_metadata ---
 
 def test_join_metadata_basic():
@@ -119,54 +105,45 @@ def test_join_metadata_unclassified():
     assert result.iloc[0]['ani_confidence'] == 'Low'
 
 
-# --- build_assay_summary ---
+# --- build_assay_summary_long / build_species_matrix ---
 
-def test_build_assay_summary_excel_sheets(tmp_path):
-    """Excel output has one sheet per assay, each containing only that assay's rows."""
-    summary = pd.DataFrame([
-        {'assay': 'VhPath', 'species_group': 'Vibrio harveyi', 'pct_detected': 100.0,
-         'n_detected': 10, 'n_assemblies': 10, 'n_primer_only': 0, 'n_not_detected': 0,
-         'pct_detected_or_primer': 100.0},
-        {'assay': 'Valg', 'species_group': 'Vibrio alginolyticus', 'pct_detected': 50.0,
-         'n_detected': 5, 'n_assemblies': 10, 'n_primer_only': 0, 'n_not_detected': 5,
-         'pct_detected_or_primer': 50.0},
+def test_build_assay_summary_long_includes_misses_and_sorts():
+    det = pd.concat([
+        make_detection_df(['GCF_001', 'GCF_002'], ['VhPath'], call='Detected'),
+        make_detection_df(['GCF_003'], ['VhPath'], call='Not Detected', n_amplicons=0),
     ])
-    assay_summary = build_assay_summary(summary)
-    xlsx_path = tmp_path / 'assay_summary.xlsx'
-    with pd.ExcelWriter(xlsx_path, engine='openpyxl') as writer:
-        for assay, grp in assay_summary.groupby('assay'):
-            grp.to_excel(writer, sheet_name=assay, index=False)
-    sheets = pd.read_excel(xlsx_path, sheet_name=None)
-    assert set(sheets.keys()) == {'VhPath', 'Valg'}
-    assert sheets['VhPath'].iloc[0]['species_group'] == 'Vibrio harveyi'
-    assert sheets['Valg'].iloc[0]['species_group'] == 'Vibrio alginolyticus'
-
-
-def test_build_assay_summary_filters_and_sorts():
-    """Only species_groups with pct_detected > 1 appear; sorted assay asc, pct_detected desc."""
-    summary = pd.DataFrame([
-        {'assay': 'VhPath', 'species_group': 'Vibrio harveyi', 'pct_detected': 100.0,
-         'n_detected': 10, 'n_assemblies': 10, 'n_primer_only': 0, 'n_not_detected': 0,
-         'pct_detected_or_primer': 100.0},
-        {'assay': 'VhPath', 'species_group': 'Vibrio sp.', 'pct_detected': 0.0,
-         'n_detected': 0, 'n_assemblies': 5, 'n_primer_only': 0, 'n_not_detected': 5,
-         'pct_detected_or_primer': 0.0},
-        {'assay': 'Valg', 'species_group': 'Vibrio alginolyticus', 'pct_detected': 50.0,
-         'n_detected': 5, 'n_assemblies': 10, 'n_primer_only': 0, 'n_not_detected': 5,
-         'pct_detected_or_primer': 50.0},
-        {'assay': 'Valg', 'species_group': 'Vibrio sp.', 'pct_detected': 1.0,
-         'n_detected': 1, 'n_assemblies': 100, 'n_primer_only': 0, 'n_not_detected': 99,
-         'pct_detected_or_primer': 1.0},
+    meta = pd.concat([
+        make_metadata_df(['GCF_001', 'GCF_002'], species='Vibrio harveyi'),
+        make_metadata_df(['GCF_003'], species='Vibrio sp.'),
     ])
-    result = build_assay_summary(summary)
-    # 1.0 is not > 1, so that row is excluded; 0.0 excluded
-    assert len(result) == 2
-    assert set(result['species_group']) == {'Vibrio harveyi', 'Vibrio alginolyticus'}
-    # Check column subset
-    assert list(result.columns) == ['assay', 'species_group', 'pct_detected', 'n_detected', 'n_assemblies']
-    # Sorted: Valg before VhPath alphabetically
-    assert result.iloc[0]['assay'] == 'Valg'
-    assert result.iloc[1]['assay'] == 'VhPath'
+    joined = join_metadata(det, meta)
+    summary = build_species_summary(joined)
+    long = build_assay_summary_long(summary)
+    # Miss (pct_detected=0) is INCLUDED
+    assert (long['pct_detected'] == 0).any()
+    assert list(long.columns) == [
+        'assay', 'species_group', 'n_assemblies', 'n_detected', 'n_primer_only',
+        'n_not_detected', 'pct_detected', 'pct_detected_or_primer',
+        'n_multi_amplicon', 'max_amplicons',
+    ]
+    # Sorted by assay, then pct_detected desc (hit before miss within VhPath)
+    vh = long[long['assay'] == 'VhPath']['pct_detected'].tolist()
+    assert vh == sorted(vh, reverse=True)
+
+
+def test_build_species_matrix_is_wide():
+    det = pd.concat([
+        make_detection_df(['GCF_001'], ['VhPath'], call='Detected'),
+        make_detection_df(['GCF_001'], ['Valg'], call='Not Detected', n_amplicons=0),
+    ])
+    meta = make_metadata_df(['GCF_001'])
+    joined = join_metadata(det, meta)
+    matrix = build_species_matrix(build_species_summary(joined))
+    assert 'species_group' in matrix.columns
+    assert 'n_assemblies' in matrix.columns
+    assert 'VhPath' in matrix.columns and 'Valg' in matrix.columns
+    r = matrix[matrix['species_group'] == 'Vibrio harveyi'].iloc[0]
+    assert r['VhPath'] == 100.0 and r['Valg'] == 0.0
 
 
 # --- build_species_summary ---
@@ -188,6 +165,8 @@ def test_build_species_summary_counts():
     assert row['n_primer_only'] == 1
     assert abs(row['pct_detected'] - 50.0) < 0.01
     assert abs(row['pct_detected_or_primer'] - 75.0) < 0.01
+    assert row['n_multi_amplicon'] == 0
+    assert row['max_amplicons'] == 1
 
 
 # --- per-assay sort order ---
@@ -230,55 +209,53 @@ def test_per_assay_sort_order(tmp_path):
 def test_build_detection_matrix_binary():
     det = pd.concat([
         make_detection_df(['GCF_001'], ['VhPath'], call='Detected'),
-        make_detection_df(['GCF_001'], ['Valg'], call='Not Detected'),
+        make_detection_df(['GCF_001'], ['Valg'], call='Not Detected', n_amplicons=0),
     ])
-    meta = make_metadata_df(['GCF_001'])
-    joined = join_metadata(det, meta)
-    binary, verbose = build_detection_matrix(joined)
+    joined = join_metadata(det, make_metadata_df(['GCF_001']))
+    binary = build_detection_matrix(joined)
     assert binary.loc['GCF_001', 'VhPath'] == 1
     assert binary.loc['GCF_001', 'Valg'] == 0
 
 
-def test_build_detection_matrix_verbose():
-    det = pd.concat([
-        make_detection_df(['GCF_001'], ['VhPath'], call='Primer Only'),
-    ])
-    meta = make_metadata_df(['GCF_001'])
-    joined = join_metadata(det, meta)
-    binary, verbose = build_detection_matrix(joined)
-    assert verbose.loc['GCF_001', 'VhPath'] == 'Primer Only'
-    assert binary.loc['GCF_001', 'VhPath'] == 0  # Primer Only → 0 in binary
-
-
 def test_build_detection_matrix_duplicate_raises():
-    """Duplicate accession×assay rows raise ValueError."""
     det = pd.concat([
         make_detection_df(['GCF_001'], ['VhPath'], call='Detected'),
         make_detection_df(['GCF_001'], ['VhPath'], call='Not Detected'),
     ])
-    meta = make_metadata_df(['GCF_001'])
-    joined = join_metadata(det, meta)
+    joined = join_metadata(det, make_metadata_df(['GCF_001']))
     with pytest.raises(ValueError, match="Duplicate"):
         build_detection_matrix(joined)
 
 
-def test_write_heatmaps_creates_files(tmp_path):
-    """write_heatmaps produces four output files (2 formats × 2 heatmaps)."""
+def test_build_detection_by_assembly_joins_metadata():
     det = pd.concat([
         make_detection_df(['GCF_001'], ['VhPath'], call='Detected'),
-        make_detection_df(['GCF_001'], ['Valg'], call='Not Detected'),
-        make_detection_df(['GCF_002'], ['VhPath'], call='Primer Only'),
-        make_detection_df(['GCF_002'], ['Valg'], call='Detected'),
+        make_detection_df(['GCF_001'], ['Valg'], call='Not Detected', n_amplicons=0),
+    ])
+    meta = make_metadata_df(['GCF_001'])
+    joined = join_metadata(det, meta)
+    binary = build_detection_matrix(joined)
+    out = build_detection_by_assembly(binary, meta)
+    assert len(out) == 1
+    row = out.iloc[0]
+    assert row['accession'] == 'GCF_001'
+    assert row['bs_host'] == 'shrimp'         # metadata carried through
+    assert row['VhPath'] == 1 and row['Valg'] == 0
+
+
+def test_write_species_heatmap_creates_files(tmp_path):
+    det = pd.concat([
+        make_detection_df(['GCF_001'], ['VhPath'], call='Detected'),
+        make_detection_df(['GCF_002'], ['VhPath'], call='Not Detected', n_amplicons=0),
+        make_detection_df(['GCF_001', 'GCF_002'], ['Valg'], call='Detected'),
     ])
     meta = make_metadata_df(['GCF_001', 'GCF_002'])
     joined = join_metadata(det, meta)
-    binary, verbose = build_detection_matrix(joined)
+    matrix = build_species_matrix(build_species_summary(joined))
     figures_dir = str(tmp_path / "figures")
-    write_heatmaps(binary, verbose, figures_dir)
-    assert (tmp_path / "figures" / "heatmap_binary.pdf").exists()
-    assert (tmp_path / "figures" / "heatmap_binary.png").exists()
-    assert (tmp_path / "figures" / "heatmap_verbose.pdf").exists()
-    assert (tmp_path / "figures" / "heatmap_verbose.png").exists()
+    write_species_heatmap(matrix, figures_dir)
+    assert (tmp_path / "figures" / "species_detection_heatmap.pdf").exists()
+    assert (tmp_path / "figures" / "species_detection_heatmap.png").exists()
 
 
 # --- write_run_manifest ---

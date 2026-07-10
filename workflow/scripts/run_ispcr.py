@@ -13,14 +13,9 @@ BLAST_COLS = [
 
 DETECTION_COLS = [
     'accession', 'assay', 'detection_call', 'n_amplicons', 'multi_amplicon_flag',
-    'amplicon_sizes', 'contig_ids', 'fwd_mismatches', 'rev_mismatches',
-    'probe_mismatches', 'probe_strand',
-]
-
-AMPLICON_COLS = [
-    'accession', 'assay', 'contig_id', 'amplicon_start', 'amplicon_end',
-    'amplicon_size', 'fwd_mismatches', 'rev_mismatches', 'probe_mismatches',
-    'probe_strand', 'amplicon_sequence',
+    'amplicon_sizes', 'contig_ids', 'amplicon_starts', 'amplicon_ends',
+    'fwd_mismatches', 'rev_mismatches', 'probe_mismatches', 'probe_strand',
+    'amplicon_sequences',
 ]
 
 _MOD_RE = re.compile(r'/[^/]+/|\[[^\]]+\]')
@@ -207,10 +202,10 @@ def load_blast_results(blast_tsv: str) -> pd.DataFrame:
 def run_ispcr(blast_tsv: str, assay_table: str, fna_path: str,
               max_primer_mismatches: int, prime3_exact_nt: int,
               max_probe_mismatches: int, max_amplicon_size: int,
-              store_amplicon_sequences: bool) -> tuple[pd.DataFrame, pd.DataFrame]:
+              store_amplicon_sequences: bool) -> pd.DataFrame:
     """
-    Core detection engine. Returns (detection_df, amplicon_details_df).
-    detection_df has one row per assay; amplicon_details_df has one row per amplicon found.
+    Core detection engine. Returns one detection DataFrame with a single row per
+    assay; per-amplicon positions and sequences are ';'-joined into that row.
     """
     blast = load_blast_results(blast_tsv)
     accession = Path(fna_path).stem
@@ -218,7 +213,7 @@ def run_ispcr(blast_tsv: str, assay_table: str, fna_path: str,
     with open(assay_table, encoding='utf-8-sig') as f:
         assays = list(csv.DictReader(f))
 
-    detection_rows, amplicon_rows = [], []
+    detection_rows = []
 
     for row in assays:
         name = row['assay']
@@ -255,32 +250,21 @@ def run_ispcr(blast_tsv: str, assay_table: str, fna_path: str,
         )
         probe_strand = next((a['probe_strand'] for a in amplicons if a['probe_strand']), None)
 
+        starts = ';'.join(str(a['amplicon_start']) for a in amplicons)
+        ends = ';'.join(str(a['amplicon_end']) for a in amplicons)
+        seqs = ';'.join(a['amplicon_sequence'] for a in amplicons)
+
         detection_rows.append({
             'accession': accession, 'assay': name, 'detection_call': call,
             'n_amplicons': n, 'multi_amplicon_flag': multi,
             'amplicon_sizes': sizes, 'contig_ids': contigs,
+            'amplicon_starts': starts, 'amplicon_ends': ends,
             'fwd_mismatches': best_fwd, 'rev_mismatches': best_rev,
             'probe_mismatches': best_probe, 'probe_strand': probe_strand,
+            'amplicon_sequences': seqs,
         })
 
-        for amp in amplicons:
-            amplicon_rows.append({
-                'accession': accession, 'assay': name,
-                'contig_id': amp['contig_id'],
-                'amplicon_start': amp['amplicon_start'],
-                'amplicon_end': amp['amplicon_end'],
-                'amplicon_size': amp['amplicon_size'],
-                'fwd_mismatches': amp['fwd_mismatches'],
-                'rev_mismatches': amp['rev_mismatches'],
-                'probe_mismatches': amp['probe_mismatches'],
-                'probe_strand': amp['probe_strand'],
-                'amplicon_sequence': amp['amplicon_sequence'],
-            })
-
-    return (
-        pd.DataFrame(detection_rows, columns=DETECTION_COLS),
-        pd.DataFrame(amplicon_rows, columns=AMPLICON_COLS),
-    )
+    return pd.DataFrame(detection_rows, columns=DETECTION_COLS)
 
 
 def main():
@@ -295,10 +279,9 @@ def main():
     p.add_argument('--store-amplicon-sequences',
                    type=lambda x: x.lower() == 'true', default=True)
     p.add_argument('--detection-out', required=True)
-    p.add_argument('--amplicons-out', required=True)
     args = p.parse_args()
 
-    det_df, amp_df = run_ispcr(
+    det_df = run_ispcr(
         blast_tsv=args.blast, assay_table=args.assay_table, fna_path=args.fna,
         max_primer_mismatches=args.max_primer_mismatches,
         prime3_exact_nt=args.prime3_exact_nt,
@@ -307,7 +290,6 @@ def main():
         store_amplicon_sequences=args.store_amplicon_sequences,
     )
     det_df.to_csv(args.detection_out, index=False)
-    amp_df.to_csv(args.amplicons_out, index=False)
 
 
 if __name__ == '__main__':

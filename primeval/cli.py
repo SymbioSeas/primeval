@@ -93,8 +93,9 @@ def _print_footer(rel_results):
     print()
     print(f"Done. Results in {rel_results}/")
     print(f"  {rel_results}/reports/species_summary.csv")
-    print(f"  {rel_results}/reports/detection_matrix.xlsx")
-    print(f"  {rel_results}/reports/figures/heatmap_binary.pdf, heatmap_verbose.pdf")
+    print(f"  {rel_results}/reports/assay_summary_long.csv")
+    print(f"  {rel_results}/reports/detection_by_assembly.csv")
+    print(f"  {rel_results}/reports/figures/species_detection_heatmap.pdf")
 
 
 def main(argv=None, runner=None):

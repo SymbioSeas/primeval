@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 # Config is supplied on the command line (primeval CLI passes --configfile;
@@ -16,6 +17,10 @@ RESULTS = config["results_dir"]
 # retain them.
 KEEP_BLAST = config.get("keep_blast", False)
 
+# Per-assembly logs/ are intermediate; deleted on successful completion unless
+# keep_logs: true. The top-level run.log (written by the primeval CLI) is kept.
+KEEP_LOGS = config.get("keep_logs", False)
+
 
 def blast_output(path):
     return path if KEEP_BLAST else temp(path)
@@ -24,15 +29,19 @@ def blast_output(path):
 rule all:
     input:
         RESULTS + "/reports/species_summary.csv",
-        RESULTS + "/reports/assay_summary.csv",
+        RESULTS + "/reports/assay_summary_long.csv",
         RESULTS + "/reports/assay_summary.xlsx",
-        RESULTS + "/reports/detection_matrix.xlsx",
+        RESULTS + "/reports/detection_by_assembly.csv",
         RESULTS + "/reports/run_manifest.txt",
-        RESULTS + "/reports/figures/heatmap_binary.pdf",
-        RESULTS + "/reports/figures/heatmap_verbose.pdf",
+        RESULTS + "/reports/figures/species_detection_heatmap.pdf",
 
 
 include: "rules/prepare.smk"
 include: "rules/blast.smk"
 include: "rules/ispcr.smk"
 include: "rules/report.smk"
+
+
+onsuccess:
+    if not KEEP_LOGS:
+        shutil.rmtree(Path(RESULTS) / "logs", ignore_errors=True)

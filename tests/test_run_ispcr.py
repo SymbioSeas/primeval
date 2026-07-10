@@ -332,7 +332,7 @@ def test_run_ispcr_integration(tmp_path):
                    "1", "25", "150", "174", "0.001", "50.0", probe_seq, probe_seq]) + "\n"
     )
 
-    det_df, amp_df = run_ispcr(
+    det_df = run_ispcr(
         blast_tsv=str(blast_tsv),
         assay_table=str(assay_csv),
         fna_path=str(fna_path),
@@ -350,6 +350,7 @@ def test_run_ispcr_integration(tmp_path):
     assert row['n_amplicons'] == 1
     assert not row['multi_amplicon_flag']
     assert '201' in str(row['amplicon_sizes'])  # 300 - 100 + 1
+    assert '100' in str(row['amplicon_starts']) and '300' in str(row['amplicon_ends'])
 
 
 def test_run_ispcr_not_detected(tmp_path):
@@ -366,7 +367,7 @@ def test_run_ispcr_not_detected(tmp_path):
     blast_tsv = tmp_path / "blast.tsv"
     blast_tsv.write_text("")  # empty file
 
-    det_df, amp_df = run_ispcr(
+    det_df = run_ispcr(
         blast_tsv=str(blast_tsv),
         assay_table=str(assay_csv),
         fna_path=str(fna_path),
@@ -379,7 +380,9 @@ def test_run_ispcr_not_detected(tmp_path):
 
     assert len(det_df) == 1
     assert det_df.iloc[0]['detection_call'] == 'Not Detected'
-    assert amp_df.empty
+    # merged single frame carries the joined amplicon columns (empty when no amplicons)
+    for col in ('amplicon_starts', 'amplicon_ends', 'amplicon_sequences'):
+        assert col in det_df.columns
 
 
 # --- call_detection mixed-probe multi-amplicon ---

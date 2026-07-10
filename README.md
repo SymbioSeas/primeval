@@ -132,7 +132,9 @@ Re-running the same name on the same day without `--force` creates
 `<NAME>_<date>_2`, `_3`, … so previous results are never overwritten. Anything
 after `--` is passed straight to Snakemake (e.g. `primeval --run-name Vpop -- -n`
 for a dry run). Set `keep_blast: true` in `config.yaml` to retain the raw
-per-assembly BLAST output (see [System requirements](#system-requirements)).
+per-assembly BLAST output (see [System requirements](#system-requirements)), or
+`keep_logs: true` to retain the per-assembly `logs/` directory (both are deleted
+on success by default; `run.log` is always kept).
 
 **Advanced (direct Snakemake / SLURM):** invoke the workflow directly, passing the
 config explicitly:
@@ -159,6 +161,11 @@ The assay table is a CSV file with the following columns:
 **Sequence notation:**
 - Standard IUPAC ambiguity codes are supported (R, Y, S, W, K, M, B, D, H, V, N)
 - Modifications can be noted inline using `/ModName/` or `[ModName]` notation; these are stripped before alignment (e.g., `/56-FAM/ACGT[BHQ1]` → `ACGT`)
+
+**Extra columns:** you may add any additional columns to `assay_table.csv` (e.g.
+`reference`, `notes`, `target_gene`) to keep your work organized. primeval ignores
+them — only `assay`, `fwd`, `rev`, and `probe` are read. The four required columns
+must be present.
 
 Example:
 
@@ -196,24 +203,39 @@ downstream by the mismatch, 3′-exact, and amplicon-size filters above.
 
 ## Outputs
 
-All outputs are written to `results_dir` (default: `results/`):
+All outputs are written to the run directory (`results/<run-name>_<date>/`):
 
 ```
-results/
-├── blast/                        # raw BLAST output per assembly (intermediate)
+results/<run-name>_<date>/
 ├── amplicons/
-│   ├── {accession}.csv           # per-assembly detection calls (one row per assay)
-│   └── {accession}_amplicons.csv # per-assembly amplicon details
+│   └── {accession}.csv           # per-assembly, one row per assay: detection call,
+│                                  #   mismatch counts, amplicon sizes/contigs/positions,
+│                                  #   and (if enabled) amplicon sequences
+├── run.log                       # full run log
 └── reports/
-    ├── species_summary.csv       # detection rates by species and assay
-    ├── assay_summary.csv         # detection rates by assay across species groups
-    ├── assay_summary.xlsx        # same, Excel format
-    ├── detection_matrix.xlsx     # detection call matrix (assemblies × assays)
-    ├── run_manifest.txt          # parameter log and tool versions
+    ├── species_summary.csv       # species × assay matrix of % detected (leading n_assemblies)
+    ├── assay_summary_long.csv     # tidy long table: one row per assay × species group,
+    │                              #   ALL groups incl. misses; detection/primer %, multi-amplicon
+    ├── assay_summary.xlsx         # same data as assay_summary_long.csv, one worksheet per assay
+    ├── detection_by_assembly.csv  # one row per assembly: input metadata + 0/1 per assay
+    ├── run_manifest.txt           # parameter log and tool versions
+    ├── per_assay/                 # {assay}_results.csv — every assembly's call for one assay
     └── figures/
-        ├── heatmap_binary.pdf    # binary detection heatmap
-        └── heatmap_verbose.pdf   # heatmap with mismatch details
+        └── species_detection_heatmap.pdf/png  # species × assay, colored by % detected
 ```
+
+**Notes**
+- `assay_summary_long.csv` (one tidy table) and `assay_summary.xlsx` (one worksheet
+  per assay) are the **same data in different layouts**, not a duplicate file.
+- `assay_summary_long.csv` includes species groups an assay *misses*
+  (`pct_detected = 0`), so you can see both what an assay detects and what it doesn't.
+- `n_multi_amplicon` / `max_amplicons` flag assays that produce more than one product
+  in a single assembly (which can overestimate abundance).
+- `detection_by_assembly.csv` joins the binary detection matrix (`1` = Detected) with
+  every column of the input `metadata.csv`, one row per assembly.
+- Raw BLAST output and the per-assembly `logs/` directory are intermediate and are
+  deleted once a run completes successfully. Set `keep_blast: true` / `keep_logs: true`
+  in `config.yaml` to retain them; the top-level `run.log` is always kept.
 
 ---
 

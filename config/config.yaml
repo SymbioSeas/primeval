@@ -24,6 +24,7 @@ max_amplicon_size: 500         # bp; well above typical qPCR/ddPCR amplicons (~7
 # ── Output options ─────────────────────────────────────────────────────────────
 store_amplicon_sequences: false  # true = store per-amplicon FASTA sequence in outputs
 keep_blast: false                # true = retain raw BLAST TSVs (large); false = delete after use
+keep_logs: false                 # true = retain per-assembly logs/ after a run; false = delete on success
 
 # ── BLAST parameters ───────────────────────────────────────────────────────────
 # These are intentionally permissive; stringency is enforced downstream
