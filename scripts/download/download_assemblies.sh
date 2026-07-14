@@ -21,6 +21,7 @@
 #   -o OUTDIR      Output directory for assemblies and metadata (default: assemblies)
 #   -l LEVELS      Assembly levels, comma-separated
 #                  (default: complete,chromosome,scaffold,contig)
+#   -s SOURCE      Assembly-source: refseq, genbank, or all (default: refseq)
 #   -e EMAIL       NCBI e-mail address (optional but polite; or set NCBI_EMAIL env var)
 #   -k API_KEY     NCBI API key for higher rate limits (or set NCBI_API_KEY env var)
 #   -h             Show this help message
@@ -42,6 +43,7 @@ set -euo pipefail
 TAXA=()
 OUTDIR="assemblies"
 LEVELS="complete,chromosome,scaffold,contig"
+ASSEMBLY_SOURCE="refseq"
 
 # ── Credentials ("set once") ────────────────────────────────────────────────────
 # Load an optional credentials file so an NCBI API key is applied on every run.
@@ -71,11 +73,12 @@ usage() {
     exit 1
 }
 
-while getopts "t:o:l:e:k:h" opt; do
+while getopts "t:o:l:s:e:k:h" opt; do
     case $opt in
         t) TAXA+=("$OPTARG") ;;
         o) OUTDIR="$OPTARG" ;;
         l) LEVELS="$OPTARG" ;;
+        s) ASSEMBLY_SOURCE="$OPTARG" ;;
         e) EMAIL="$OPTARG" ;;
         k) API_KEY="$OPTARG" ;;
         h) usage ;;
@@ -87,6 +90,11 @@ if [[ ${#TAXA[@]} -eq 0 ]]; then
     echo "ERROR: at least one -t TAXON is required." >&2
     usage
 fi
+
+case "${ASSEMBLY_SOURCE}" in
+    refseq|genbank|all) ;;
+    *) echo "ERROR: -s must be one of: refseq, genbank, all (got '${ASSEMBLY_SOURCE}')." >&2; exit 1 ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARSER="${SCRIPT_DIR}/parse_metadata.py"
@@ -112,6 +120,7 @@ log "===== primeval assembly download ====="
 log "Taxa         : ${#TAXA[@]} (${TAXA[*]})"
 log "Output dir   : ${OUTDIR}"
 log "Assembly levels: ${LEVELS}"
+log "Assembly source: ${ASSEMBLY_SOURCE}"
 
 # ── Step 1: Fetch accession list ───────────────────────────────────────────────
 log "Fetching assembly list from NCBI ..."
@@ -130,7 +139,7 @@ fi
 for TAX in "${TAXA[@]}"; do
     log "  querying: ${TAX}"
     datasets summary genome taxon "${TAX}" \
-        --assembly-source refseq \
+        --assembly-source "${ASSEMBLY_SOURCE}" \
         --assembly-level "${LEVELS}" \
         --as-json-lines \
         ${APIKEY_ARGS[@]+"${APIKEY_ARGS[@]}"} >> "${SUMMARY_ALL}"

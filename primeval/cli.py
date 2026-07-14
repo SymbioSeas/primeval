@@ -1,13 +1,33 @@
 """primeval command-line wrapper around the Snakemake workflow."""
 import argparse
+import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .rundir import resolve_run_dir
 
 # <repo>/primeval/cli.py -> <repo>/workflow/Snakefile
 WORKFLOW = Path(__file__).resolve().parent.parent / "workflow" / "Snakefile"
+
+_PROGRESS_RE = re.compile(r'(\d+) of (\d+) steps \(([\d.]+)%\) done')
+_ALERT_RE = re.compile(r'\b(error|exception|traceback|warning|failed)\b', re.IGNORECASE)
+
+
+def filter_terminal_line(line: str, state: dict) -> list:
+    """Return terminal lines for one raw Snakemake line (full line still logged)."""
+    m = _PROGRESS_RE.search(line)
+    if m:
+        done, total, pct = m.group(1), m.group(2), float(m.group(3))
+        milestone = int(pct // 10) * 10
+        if milestone > state.get('last_milestone', -1):
+            state['last_milestone'] = milestone
+            return [f"  progress: {done}/{total} steps ({pct:.0f}%)"]
+        return []
+    if _ALERT_RE.search(line):
+        return ["  " + line.rstrip()]
+    return []
 
 
 def build_parser():
@@ -66,13 +86,15 @@ def _is_dry_run(extra):
 
 def _tee_run(cmd, logf):
     lf = open(logf, "a") if logf else None
+    state = {}
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, bufsize=1)
         for line in proc.stdout:
-            sys.stdout.write(line)
             if lf:
                 lf.write(line)
+            for out in filter_terminal_line(line, state):
+                print(out, flush=True)
         proc.wait()
     finally:
         if lf:
@@ -83,19 +105,18 @@ def _tee_run(cmd, logf):
 def _print_header(run_name, rel_results, n_assemblies):
     n = "unknown" if n_assemblies is None else str(n_assemblies)
     print(f"primeval  |  run: {Path(rel_results).name}")
-    print(f"  workflow : {WORKFLOW}")
-    print(f"  input    : assemblies/  ({n} assemblies)")
-    print(f"  results  : {rel_results}/")
+    print(f"  input   : assemblies/  ({n} assemblies)")
+    print(f"  results : {rel_results}/")
     print()
 
 
-def _print_footer(rel_results):
-    print()
-    print(f"Done. Results in {rel_results}/")
-    print(f"  {rel_results}/reports/species_summary.csv")
-    print(f"  {rel_results}/reports/assay_summary_long.csv")
-    print(f"  {rel_results}/reports/detection_by_assembly.csv")
-    print(f"  {rel_results}/reports/figures/species_detection_heatmap.pdf")
+def _print_footer(rel_results, elapsed):
+    mins, secs = divmod(int(elapsed), 60)
+    print(f"\nDone in {mins}m{secs:02d}s. Results in {rel_results}/")
+    print(f"  {rel_results}/reports/assay_performance.csv       (per-assay sensitivity/specificity)")
+    print(f"  {rel_results}/reports/detection_summary_long.csv  (per assay x group, all groupings)")
+    print(f"  {rel_results}/reports/detection_by_assembly.csv   (per-assembly calls + metadata)")
+    print(f"  {rel_results}/reports/figures/                    (one heatmap per grouping column)")
 
 
 def main(argv=None, runner=None):
@@ -124,19 +145,23 @@ def main(argv=None, runner=None):
         logf = run_dir / "run.log"
 
     _print_header(args.run_name, rel_results, _count_assemblies(configfile, workdir))
+    if not dry:
+        print(f"Running primeval (full log: {rel_results}/run.log) ...")
 
     cmd = build_snakemake_cmd(
         snakefile=WORKFLOW, workdir=workdir, configfile=configfile,
         results_dir_rel=rel_results, cores=args.cores, extra=extra,
     )
     runner = runner or _tee_run
+    t0 = time.perf_counter()
     rc = runner(cmd, logf)
+    elapsed = time.perf_counter() - t0
     if rc != 0:
-        print(f"error: run failed (exit {rc}); see {logf}", file=sys.stderr)
+        print(f"\nerror: run failed (exit {rc}); see {logf}", file=sys.stderr)
     elif dry:
         print(f"\nDry run complete (no files written). Real run would write to {rel_results}/")
     else:
-        _print_footer(rel_results)
+        _print_footer(rel_results, elapsed)
     return rc
 
 

@@ -7,15 +7,17 @@ rule aggregate_report:
         metadata=config["metadata"],
         assay_table=config["assay_table"],
     output:
-        species_summary=config["results_dir"] + "/reports/species_summary.csv",
-        assay_summary_long=config["results_dir"] + "/reports/assay_summary_long.csv",
+        matrices=expand(config["results_dir"] + "/reports/{gcol}_detection_matrix.csv", gcol=GROUP_COLS),
+        heatmaps=expand(config["results_dir"] + "/reports/figures/{gcol}_detection_heatmap.pdf", gcol=GROUP_COLS),
+        detection_long=config["results_dir"] + "/reports/detection_summary_long.csv",
         assay_summary_xlsx=config["results_dir"] + "/reports/assay_summary.xlsx",
         detection_by_assembly=config["results_dir"] + "/reports/detection_by_assembly.csv",
+        assay_performance=config["results_dir"] + "/reports/assay_performance.csv",
         manifest=config["results_dir"] + "/reports/run_manifest.txt",
-        species_heatmap=config["results_dir"] + "/reports/figures/species_detection_heatmap.pdf",
     params:
         amplicons_dir=config["results_dir"] + "/amplicons",
         reports_dir=config["results_dir"] + "/reports",
+        group_by=" ".join(GROUP_BY),
         max_primer_mismatches=config["max_primer_mismatches"],
         prime3_exact_nt=config["prime3_exact_nt"],
         max_probe_mismatches=config["max_probe_mismatches"],
@@ -32,6 +34,7 @@ rule aggregate_report:
             --metadata "{input.metadata}" \
             --assay-table "{input.assay_table}" \
             --reports-dir {params.reports_dir} \
+            --group-by {params.group_by} \
             --max-primer-mismatches {params.max_primer_mismatches} \
             --prime3-exact-nt {params.prime3_exact_nt} \
             --max-probe-mismatches {params.max_probe_mismatches} \

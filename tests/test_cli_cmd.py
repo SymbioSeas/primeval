@@ -1,4 +1,4 @@
-from primeval.cli import build_parser, build_snakemake_cmd
+from primeval.cli import build_parser, build_snakemake_cmd, filter_terminal_line
 
 
 def test_parser_defaults():
@@ -38,3 +38,24 @@ def test_build_cmd_extra_appended():
         results_dir_rel="results/x", cores=4, extra=["-n"],
     )
     assert cmd[-1] == "-n"
+
+
+def test_filter_progress_milestones():
+    state = {}
+    assert filter_terminal_line("5 of 100 steps (5%) done", state)
+    assert filter_terminal_line("8 of 100 steps (8%) done", state) == []
+    assert filter_terminal_line("12 of 100 steps (12%) done", state)
+
+
+def test_filter_alerts_pass_through():
+    state = {}
+    assert filter_terminal_line("Error in rule run_blast:", state)
+    assert filter_terminal_line("WARNING: something", state)
+    assert filter_terminal_line("Traceback (most recent call last):", state)
+
+
+def test_filter_suppresses_noise():
+    state = {}
+    assert filter_terminal_line("Building DAG of jobs...", state) == []
+    assert filter_terminal_line("Select jobs to execute...", state) == []
+    assert filter_terminal_line("Finished job 42.", state) == []

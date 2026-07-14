@@ -102,6 +102,13 @@ max_primer_mismatches: 2            # mismatches allowed per primer
 prime3_exact_nt: 3                  # 3′-terminal bases that must match exactly
 max_probe_mismatches: 1             # mismatches allowed in probe
 max_amplicon_size: 500              # maximum amplicon size (bp)
+
+# group_by: metadata column(s) used to group assemblies in the reports (a
+# detection matrix + heatmap is written per column). Optional — leave unset to
+# auto-group by NCBI ANI-derived species (requires metadata from
+# download-assemblies). See "Metadata format" below.
+# group_by: "species"
+# group_by: ["species", "phenotype"]
 ```
 
 ### 3. Prepare your assay table
@@ -157,6 +164,7 @@ The assay table is a CSV file with the following columns:
 | `fwd`   | Yes      | Forward primer sequence (5′→3′)                                                           |
 | `rev`   | Yes      | Reverse primer sequence (5′→3′, same orientation as fwd - primeval handles RC internally) |
 | `probe` | No       | Probe sequence (5′→3′). Leave empty for probe-free (SYBR) assays                          |
+| `target_group` | No | The metadata group this assay is designed to detect, as `column:value` (e.g. `phenotype:protective`, `species:Vibrio mediterranei`). A bare value (no colon) is matched against the primary `group_by` column. Drives `assay_performance.csv`. Leave blank for control/reference assays. |
 
 **Sequence notation:**
 - Standard IUPAC ambiguity codes are supported (R, Y, S, W, K, M, B, D, H, V, N)
@@ -164,15 +172,42 @@ The assay table is a CSV file with the following columns:
 
 **Extra columns:** you may add any additional columns to `assay_table.csv` (e.g.
 `reference`, `notes`, `target_gene`) to keep your work organized. primeval ignores
-them — only `assay`, `fwd`, `rev`, and `probe` are read. The four required columns
-must be present.
+them — only `assay`, `fwd`, `rev`, `probe`, and `target_group` are read.
+`assay`, `fwd`, and `rev` are required; `probe` and `target_group` may be blank.
 
 Example:
 
 ```
-assay,probe,fwd,rev
-Assay1,ACGGGACAAAAAGGATGGCGAGTAC,AGCCGAGCGTTACCAGC,CGAACGCAATGATTCTCTGAGC
-Assay2,,GCTACGCCCTCCATCATCC,GCGCGTGATTATCTGATAGC
+assay,probe,fwd,rev,target_group
+Assay1,ACGGGACAAAAAGGATGGCGAGTAC,AGCCGAGCGTTACCAGC,CGAACGCAATGATTCTCTGAGC,species:Vibrio mediterranei
+Assay2,,GCTACGCCCTCCATCATCC,GCGCGTGATTATCTGATAGC,
+```
+
+---
+
+## Metadata format
+
+`metadata.csv` describes your assemblies. **Only one column is required:**
+- `accession` — must match the assembly filenames (`<accession>.fna`).
+
+Every other column is optional and carried through to the per-assembly outputs. To group assemblies in the reports, set `group_by` in `config.yaml` to one or more metadata columns:
+
+```yaml
+group_by: "species"                 # single grouping
+group_by: ["species", "phenotype"]  # a detection matrix + heatmap per column
+```
+
+Grouping-column **names** must not contain whitespace — use e.g. `isolation_source`, not `isolation source`.
+
+If you used `download-assemblies`, the generated `metadata.csv` carries NCBI ANI/BioSample fields and primeval **auto-groups by ANI-derived species** when `group_by` is unset — no configuration needed. If you bring your own `metadata.csv` without those NCBI columns, you must set `group_by`. When you set `group_by`, assemblies missing from `metadata.csv` or with an empty cell in a grouping column are still analyzed and reported under `Ungrouped`. In the default ANI-auto mode (no `group_by`), assemblies whose ANI assignment is missing or low-confidence are reported under `Unclassified (low confidence ANI)`.
+
+Because grouping columns are independent, an assay can be scored against a different resolution than the one used to lay out a matrix — e.g. group the report by `species` while scoring a nested clade assay with `target_group: phenotype:protective`.
+
+Example minimal metadata:
+```
+accession,species,phenotype
+GCF_000000001.1,Vibrio mediterranei,protective
+GCF_000000002.1,Vibrio harveyi,
 ```
 
 ---
@@ -194,6 +229,8 @@ primeval reports a detection call per assay per assembly using thresholds set in
 - `Primer Only` — valid amplicon found but probe not detected within it
 - `Not Detected` — no valid amplicon found
 
+**Interpreting `Primer Only`:** both primers bind and would amplify, but the probe site is diverged or absent. For a hydrolysis-probe (ddPCR/qPCR) assay this usually means **no fluorescent signal** despite amplification, so `assay_performance.csv` counts it as a non-detection; for SYBR/probe-free chemistry any valid amplicon is a detection. `pct_detected_or_primer` in the summaries lets you see both interpretations.
+
 The BLAST search itself is run with deliberately permissive settings
 (`evalue=1000`, `perc_identity=70`, `word_size=7`, tuned for short oligo
 queries) so that no candidate binding site is missed; stringency is enforced
@@ -213,24 +250,38 @@ results/<run-name>_<date>/
 │                                  #   and (if enabled) amplicon sequences
 ├── run.log                       # full run log
 └── reports/
-    ├── species_summary.csv       # species × assay matrix of % detected (leading n_assemblies)
-    ├── assay_summary_long.csv     # tidy long table: one row per assay × species group,
-    │                              #   ALL groups incl. misses; detection/primer %, multi-amplicon
-    ├── assay_summary.xlsx         # same data as assay_summary_long.csv, one worksheet per assay
-    ├── detection_by_assembly.csv  # one row per assembly: input metadata + 0/1 per assay
-    ├── run_manifest.txt           # parameter log and tool versions
-    ├── per_assay/                 # {assay}_results.csv — every assembly's call for one assay
+    ├── {column}_detection_matrix.csv   # one per group_by column: group × assay % detected
+    ├── detection_summary_long.csv       # tidy long table: assay × grouping × group (incl. misses)
+    ├── assay_summary.xlsx               # same as detection_summary_long, one worksheet per assay
+    ├── assay_performance.csv            # per-assay sensitivity / specificity / precision vs target_group
+    ├── detection_by_assembly.csv        # one row per assembly: metadata + 0/1 per assay
+    ├── run_manifest.txt                 # parameters, tool versions, checksums, input accounting
+    ├── per_assay/                       # {assay}_results.csv — every assembly's call for one assay
     └── figures/
-        └── species_detection_heatmap.pdf/png  # species × assay, colored by % detected
+        └── {column}_detection_heatmap.pdf/png   # one per group_by column
 ```
 
 **Notes**
-- `assay_summary_long.csv` (one tidy table) and `assay_summary.xlsx` (one worksheet
+- `{column}_detection_matrix.csv` and its matching `figures/{column}_detection_heatmap.*`
+  are written once per `group_by` column (or once as `group_detection_matrix.csv` /
+  `group_detection_heatmap.*` in ANI-auto mode, since the auto-derived column is named
+  `group`). See [Metadata format](#metadata-format).
+- `detection_summary_long.csv` (one tidy table) and `assay_summary.xlsx` (one worksheet
   per assay) are the **same data in different layouts**, not a duplicate file.
-- `assay_summary_long.csv` includes species groups an assay *misses*
-  (`pct_detected = 0`), so you can see both what an assay detects and what it doesn't.
-- `n_multi_amplicon` / `max_amplicons` flag assays that produce more than one product
-  in a single assembly (which can overestimate abundance).
+- `detection_summary_long.csv` includes assay × grouping-column × group combinations an
+  assay *misses* (`pct_detected = 0`), so you can see both what an assay detects and
+  what it doesn't, across every `group_by` column.
+- `assay_performance.csv` reports, per assay with a declared `target_group`, sensitivity
+  (% of target assemblies detected), specificity (% of non-target assemblies correctly
+  not detected), and precision, plus the `target_column` each was scored on. Because
+  targets are `column:value`, a nested clade assay (`phenotype:protective`) and a
+  species-wide assay (`species:Vibrio mediterranei`) are each scored against the right
+  axis in one run. Assays without a `target_group` (controls) appear with blank metrics.
+  `Primer Only` counts as a non-detection here.
+- `n_multi_amplicon` / `max_amplicons` flag assemblies where an assay produces more than
+  one product. Interpretation is target-dependent: for a single-copy target this can
+  indicate off-target priming or overestimated abundance, whereas for a multi-copy
+  target (e.g. 16S rRNA) multiple amplicons per genome are expected.
 - `detection_by_assembly.csv` joins the binary detection matrix (`1` = Detected) with
   every column of the input `metadata.csv`, one row per assembly.
 - Raw BLAST output and the per-assembly `logs/` directory are intermediate and are
@@ -259,6 +310,7 @@ Options:
 | `-t TAXON` | Taxon name or NCBI tax ID (required; **repeatable** — see below) | — |
 | `-o OUTDIR` | Output directory | `assemblies` |
 | `-l LEVELS` | Assembly levels (comma-separated) | `complete,chromosome,scaffold,contig` |
+| `-s SOURCE` | Assembly source: `refseq`, `genbank`, or `all` | `refseq` |
 | `-e EMAIL` | NCBI e-mail (or set `NCBI_EMAIL` env var) | — |
 | `-k API_KEY` | NCBI API key for higher rate limits (or set `NCBI_API_KEY` env var) | — |
 
@@ -321,6 +373,8 @@ primeval tests assay sensitivity and specificity against **your input assembly d
 
 This two-stage approach is computationally efficient, such that you only download and evaluate assemblies in taxa where off-target primer binding is possible.
 
+Step 1 is a manual pre-screen performed through the NCBI web interface; it is not part of the reproducible primeval pipeline. The reproducible specificity evidence for a manuscript comes from primeval's `assay_performance.csv` over your assembled dataset (Step 2 onward).
+
 > **Planned feature:** A future release will support BLASTing directly against NCBI pre-built reference databases (e.g., `ref_prok_rep_genomes`) as a single-step broader specificity check, without requiring manual assembly downloads.
 
 ---
@@ -347,6 +401,23 @@ primeval --run-name test --configfile config/config.yaml
 ```
 
 The test dataset covers all detection scenarios: `Detected` (including via minus-strand primer binding), `Primer Only`, and `Not Detected`.
+
+### Example output
+
+With `group_by: "species"` set and a `target_group` of `species:Vibrio mediterranei`
+declared for assay `VmedA`, the reports look like this (illustrative, not the actual
+test-dataset numbers):
+
+```
+# species_detection_matrix.csv (illustrative)
+group,n_assemblies,VhPath,VmedA
+Vibrio harveyi,2,100.0,0.0
+Vibrio mediterranei,3,0.0,66.67
+
+# assay_performance.csv (illustrative)
+assay,target_group,target_column,n_target,n_nontarget,tp,fn,fp,tn,sensitivity,specificity,precision,n_detected_total
+VmedA,species:Vibrio mediterranei,species,3,2,2,1,0,2,66.67,100.0,100.0,2
+```
 
 ---
 
@@ -377,9 +448,10 @@ full usage, see the [assay-design README](assay-design/README.md).
 
 ## Citation
 
-If you use primeval in your research, please cite:
+If you use primeval, please cite the archived release (DOI via Zenodo — added at manuscript submission):
 
 > Smith S, et al. (2026) *[manuscript title]*. *[journal]*. doi:[doi]
+> primeval [version] (2026). Zenodo. doi:[zenodo-doi]
 
 ---
 

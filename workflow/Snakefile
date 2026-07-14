@@ -26,14 +26,27 @@ def blast_output(path):
     return path if KEEP_BLAST else temp(path)
 
 
+# Intentional duplicate of normalize_group_by() in workflow/scripts/summarize.py:
+# Snakemake evaluates this at DAG-build time in a separate process from the summarize
+# script, so it can't import that function directly. Keep the two in sync.
+def _normalize_group_by(v):
+    if not v:
+        return []
+    return [v] if isinstance(v, str) else list(v)
+
+GROUP_BY = _normalize_group_by(config.get("group_by"))   # [] in ANI-auto mode
+GROUP_COLS = GROUP_BY or ["group"]                        # for output filenames
+
+
 rule all:
     input:
-        RESULTS + "/reports/species_summary.csv",
-        RESULTS + "/reports/assay_summary_long.csv",
+        expand(RESULTS + "/reports/{gcol}_detection_matrix.csv", gcol=GROUP_COLS),
+        expand(RESULTS + "/reports/figures/{gcol}_detection_heatmap.pdf", gcol=GROUP_COLS),
+        RESULTS + "/reports/detection_summary_long.csv",
         RESULTS + "/reports/assay_summary.xlsx",
         RESULTS + "/reports/detection_by_assembly.csv",
+        RESULTS + "/reports/assay_performance.csv",
         RESULTS + "/reports/run_manifest.txt",
-        RESULTS + "/reports/figures/species_detection_heatmap.pdf",
 
 
 include: "rules/prepare.smk"

@@ -21,6 +21,16 @@ prime3_exact_nt: 3             # 3'-terminal bases must match exactly (extension
 max_probe_mismatches: 1        # probe-based assays only; probes tolerate less mismatch than primers
 max_amplicon_size: 500         # bp; well above typical qPCR/ddPCR amplicons (~70-200 bp), rejects spurious long products
 
+# ── Grouping ─────────────────────────────────────────────────────────────────
+# group_by: one or more metadata.csv columns used to group assemblies in the
+# reports. Provide a single column or a YAML list; one detection matrix +
+# heatmap is written per column. Leave unset (commented out) to auto-group by
+# NCBI ANI-derived species when the metadata came from the download helper. If
+# you bring your own metadata.csv without the NCBI ANI columns, you MUST set
+# group_by to one (or more) of its columns.
+#   group_by: "species"
+#   group_by: ["species", "phenotype"]
+
 # ── Output options ─────────────────────────────────────────────────────────────
 store_amplicon_sequences: false  # true = store per-amplicon FASTA sequence in outputs
 keep_blast: false                # true = retain raw BLAST TSVs (large); false = delete after use

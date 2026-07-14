@@ -11,38 +11,13 @@ from pathlib import Path
 from datetime import datetime
 
 
-METADATA_COLS = [
-    'accession', 'ani_best_match_organism', 'ani_match_status', 'ani_taxonomy_check',
-    'infraspecific_strain', 'bs_strain', 'bs_host', 'bs_isolation_source', 'assembly_level',
-]
-
 DETECTION_COLS = [
     'accession', 'assay', 'detection_call', 'n_amplicons', 'multi_amplicon_flag',
     'amplicon_sizes', 'contig_ids', 'fwd_mismatches', 'rev_mismatches',
     'probe_mismatches', 'probe_strand',
 ]
 
-PER_ASSAY_COLS = [
-    'accession', 'infraspecific_strain', 'bs_strain', 'bs_host', 'bs_isolation_source',
-    'assembly_level', 'ani_best_match_organism', 'ani_confidence', 'detection_call',
-    'n_amplicons', 'multi_amplicon_flag', 'amplicon_sizes', 'contig_ids',
-    'fwd_mismatches', 'rev_mismatches', 'probe_mismatches', 'probe_strand',
-]
-
 DETECTION_CALL_ORDER = ['Detected', 'Primer Only', 'Not Detected']
-
-SPECIES_SUMMARY_COLS = [
-    'species_group', 'assay', 'n_assemblies', 'n_detected',
-    'n_primer_only', 'n_not_detected', 'pct_detected', 'pct_detected_or_primer',
-    'n_multi_amplicon', 'max_amplicons',
-]
-
-ASSAY_SUMMARY_LONG_COLS = [
-    'assay', 'species_group', 'n_assemblies', 'n_detected', 'n_primer_only',
-    'n_not_detected', 'pct_detected', 'pct_detected_or_primer',
-    'n_multi_amplicon', 'max_amplicons',
-]
-
 
 _HIGH_ANI_STATUSES = {'species_match', 'subspecies_match', 'derived_species_match'}
 
@@ -72,66 +47,106 @@ def load_detection_results(amplicons_dir: str) -> pd.DataFrame:
 
 
 def join_metadata(det: pd.DataFrame, meta: pd.DataFrame) -> pd.DataFrame:
-    """Left-join detection results with assembly metadata.
-    Unmatched assemblies get ani_best_match_organism='Unclassified'; other metadata fields='Unknown'.
-    Computes ani_confidence (High/Genus/Low) from ani_match_status and ani_taxonomy_check.
-    """
-    joined = det.merge(meta[METADATA_COLS], on='accession', how='left')
-    joined['ani_best_match_organism'] = joined['ani_best_match_organism'].fillna('Unclassified')
-    joined['ani_match_status'] = joined['ani_match_status'].fillna('no_match')
-    joined['ani_taxonomy_check'] = joined['ani_taxonomy_check'].fillna('unknown')
-    for col in ['infraspecific_strain', 'bs_strain', 'bs_host', 'bs_isolation_source', 'assembly_level']:
-        joined[col] = joined[col].fillna('Unknown')
-    joined['ani_confidence'] = joined.apply(_compute_ani_confidence, axis=1)
-    return joined
+    """Left-join detection results with ALL metadata columns on 'accession'.
+    Only 'accession' is required in meta."""
+    if 'accession' not in meta.columns:
+        raise ValueError("metadata.csv must contain an 'accession' column")
+    meta_cols = [c for c in meta.columns if c == 'accession' or c not in det.columns]
+    return det.merge(meta[meta_cols], on='accession', how='left')
 
 
-def build_species_summary(joined: pd.DataFrame) -> pd.DataFrame:
-    """Compute per-species-group × per-assay detection counts and percentages.
-    Uses effective_species grouping (High-confidence: raw species; Genus: species + suffix; Low: Unclassified).
-    """
+_ANI_COLS = {'ani_match_status', 'ani_taxonomy_check', 'ani_best_match_organism'}
+
+
+def normalize_group_by(value) -> list:
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [value]
+    return list(value)
+
+
+def _grouped_values(series: pd.Series) -> pd.Series:
+    s = series.astype('object')
+    return s.where(s.notna(), 'Ungrouped').replace('', 'Ungrouped')
+
+
+def compute_grouping(joined: pd.DataFrame, group_by: list) -> tuple[pd.DataFrame, list]:
+    """Return (joined, grouping_cols). Explicit columns, else ANI auto-grouping."""
+    if group_by:
+        missing = [c for c in group_by if c not in joined.columns]
+        if missing:
+            raise ValueError(
+                f"group_by column(s) {missing} not found in metadata. "
+                f"Available: {sorted(joined.columns)}")
+        return joined, list(group_by)
+    if _ANI_COLS.issubset(joined.columns):
+        joined = joined.copy()
+        joined['ani_best_match_organism'] = joined['ani_best_match_organism'].fillna('Unclassified')
+        joined['ani_match_status'] = joined['ani_match_status'].fillna('no_match')
+        joined['ani_taxonomy_check'] = joined['ani_taxonomy_check'].fillna('unknown')
+        joined['ani_confidence'] = joined.apply(_compute_ani_confidence, axis=1)
+        joined['group'] = joined.apply(_effective_species, axis=1)
+        return joined, ['group']
+    raise ValueError(
+        "No group_by set and metadata lacks NCBI ANI columns. "
+        "Set 'group_by' in config.yaml to the metadata column(s) to group by.")
+
+
+GROUP_SUMMARY_COLS = [
+    'grouping', 'group', 'assay', 'n_assemblies', 'n_detected',
+    'n_primer_only', 'n_not_detected', 'pct_detected', 'pct_detected_or_primer',
+    'n_multi_amplicon', 'max_amplicons',
+]
+
+DETECTION_SUMMARY_LONG_COLS = [
+    'assay', 'grouping', 'group', 'n_assemblies', 'n_detected', 'n_primer_only',
+    'n_not_detected', 'pct_detected', 'pct_detected_or_primer',
+    'n_multi_amplicon', 'max_amplicons',
+]
+
+
+def build_group_summary(joined: pd.DataFrame, gcol: str) -> pd.DataFrame:
+    """Compute per group-value × per-assay detection counts and percentages
+    for one grouping column."""
     df = joined.copy()
-    df['species_group'] = df.apply(_effective_species, axis=1)
+    df['group'] = _grouped_values(df[gcol])
     rows = []
-    for (species, assay), grp in df.groupby(['species_group', 'assay']):
+    for (grpname, assay), grp in df.groupby(['group', 'assay']):
         n = len(grp)
-        n_det = (grp['detection_call'] == 'Detected').sum()
-        n_po = (grp['detection_call'] == 'Primer Only').sum()
-        n_nd = (grp['detection_call'] == 'Not Detected').sum()
+        n_det = int((grp['detection_call'] == 'Detected').sum())
+        n_po = int((grp['detection_call'] == 'Primer Only').sum())
+        n_nd = int((grp['detection_call'] == 'Not Detected').sum())
         namp = pd.to_numeric(grp['n_amplicons'], errors='coerce').fillna(0)
         rows.append({
-            'species_group': species,
-            'assay': assay,
-            'n_assemblies': n,
-            'n_detected': int(n_det),
-            'n_primer_only': int(n_po),
-            'n_not_detected': int(n_nd),
-            'pct_detected': round(100 * n_det / n, 2) if n > 0 else 0.0,
-            'pct_detected_or_primer': round(100 * (n_det + n_po) / n, 2) if n > 0 else 0.0,
+            'grouping': gcol, 'group': grpname, 'assay': assay, 'n_assemblies': n,
+            'n_detected': n_det, 'n_primer_only': n_po, 'n_not_detected': n_nd,
+            'pct_detected': round(100 * n_det / n, 2) if n else 0.0,
+            'pct_detected_or_primer': round(100 * (n_det + n_po) / n, 2) if n else 0.0,
             'n_multi_amplicon': int((namp > 1).sum()),
             'max_amplicons': int(namp.max()) if len(namp) else 0,
         })
-    return pd.DataFrame(rows, columns=SPECIES_SUMMARY_COLS)
+    return pd.DataFrame(rows, columns=GROUP_SUMMARY_COLS)
 
 
-def build_assay_summary_long(species_summary: pd.DataFrame) -> pd.DataFrame:
-    """Per assay × species_group, ALL species groups (including pct_detected=0),
-    sorted by assay then pct_detected descending."""
-    if species_summary.empty:
-        return pd.DataFrame(columns=ASSAY_SUMMARY_LONG_COLS)
-    df = species_summary[ASSAY_SUMMARY_LONG_COLS].copy()
-    return df.sort_values(['assay', 'pct_detected'], ascending=[True, False]).reset_index(drop=True)
+def build_assay_summary_long(summary_all: pd.DataFrame) -> pd.DataFrame:
+    """Per assay × grouping × group, ALL groups (including pct_detected=0),
+    sorted by assay, grouping, then pct_detected descending."""
+    if summary_all.empty:
+        return pd.DataFrame(columns=DETECTION_SUMMARY_LONG_COLS)
+    df = summary_all[DETECTION_SUMMARY_LONG_COLS].copy()
+    return df.sort_values(['assay', 'grouping', 'pct_detected'],
+                          ascending=[True, True, False]).reset_index(drop=True)
 
 
-def build_species_matrix(species_summary: pd.DataFrame) -> pd.DataFrame:
-    """Wide species × assay matrix of pct_detected with a leading n_assemblies column.
-    Rows = species_group (as a column after reset), columns = assays."""
-    if species_summary.empty:
-        return pd.DataFrame(columns=['species_group', 'n_assemblies'])
-    n_assemblies = species_summary.groupby('species_group')['n_assemblies'].first()
-    matrix = species_summary.pivot_table(
-        index='species_group', columns='assay', values='pct_detected', aggfunc='first'
-    )
+def build_group_matrix(summary: pd.DataFrame) -> pd.DataFrame:
+    """Wide group × assay matrix of pct_detected with a leading n_assemblies column.
+    Operates on a single-column summary (one grouping column)."""
+    if summary.empty:
+        return pd.DataFrame(columns=['group', 'n_assemblies'])
+    n_assemblies = summary.groupby('group')['n_assemblies'].first()
+    matrix = summary.pivot_table(index='group', columns='assay',
+                                 values='pct_detected', aggfunc='first')
     matrix.insert(0, 'n_assemblies', n_assemblies)
     return matrix.reset_index()
 
@@ -155,27 +170,121 @@ def build_detection_by_assembly(binary: pd.DataFrame, meta: pd.DataFrame) -> pd.
     return meta.merge(binary.reset_index(), on='accession', how='right')
 
 
-def write_species_heatmap(species_matrix: pd.DataFrame, figures_dir: str) -> None:
-    """Species × assay heatmap colored by pct_detected (0-100)."""
+def write_group_heatmap(matrix: pd.DataFrame, figures_dir: str, gcol: str) -> None:
+    """Group × assay heatmap colored by pct_detected (0-100)."""
     Path(figures_dir).mkdir(parents=True, exist_ok=True)
-    if species_matrix.empty:
+    if matrix.empty:
         return
-    mat = species_matrix.set_index('species_group').drop(columns=['n_assemblies'], errors='ignore')
+    mat = matrix.set_index('group').drop(columns=['n_assemblies'], errors='ignore')
     if mat.empty:
         return
     annotate = mat.shape[0] * mat.shape[1] <= 300
     fig, ax = plt.subplots(figsize=(max(6, len(mat.columns)), max(4, len(mat) * 0.4)))
     sns.heatmap(mat, ax=ax, cmap='viridis', vmin=0, vmax=100,
-                linewidths=0.5, linecolor='white',
-                annot=annotate, fmt='.0f',
+                linewidths=0.5, linecolor='white', annot=annotate, fmt='.0f',
                 cbar_kws={'label': '% detected'})
-    ax.set_title('Species detection (% of assemblies detected)')
+    ax.set_title(f'{gcol} detection (% of assemblies detected)')
     ax.set_xlabel('Assay')
-    ax.set_ylabel('Species group')
+    ax.set_ylabel(gcol)
     plt.tight_layout()
     for ext in ('pdf', 'png'):
-        fig.savefig(f"{figures_dir}/species_detection_heatmap.{ext}", dpi=150)
+        fig.savefig(f"{figures_dir}/{gcol}_detection_heatmap.{ext}", dpi=150)
     plt.close(fig)
+
+
+_DETECTION_OUTPUT_COLS = [
+    'detection_call', 'n_amplicons', 'multi_amplicon_flag', 'amplicon_sizes',
+    'contig_ids', 'fwd_mismatches', 'rev_mismatches', 'probe_mismatches', 'probe_strand',
+]
+
+
+def dynamic_per_assay_columns(joined: pd.DataFrame) -> list:
+    reserved = set(_DETECTION_OUTPUT_COLS) | {'accession', 'assay'}
+    meta_cols = [c for c in joined.columns if c not in reserved]
+    ordered = ['accession'] + meta_cols + \
+        [c for c in _DETECTION_OUTPUT_COLS if c in joined.columns]
+    return [c for c in ordered if c in joined.columns]
+
+
+ASSAY_PERF_COLS = [
+    'assay', 'target_group', 'target_column', 'n_target', 'n_nontarget',
+    'tp', 'fn', 'fp', 'tn', 'sensitivity', 'specificity', 'precision',
+    'n_detected_total',
+]
+
+
+def load_assay_targets(assay_table_path: str) -> dict:
+    """Map assay name -> raw target_group string ('' when column absent or blank)."""
+    with open(assay_table_path, encoding='utf-8-sig') as f:
+        rows = list(csv.DictReader(f))
+    return {r['assay']: (r.get('target_group') or '').strip() for r in rows}
+
+
+def parse_target(target: str, primary_col: str):
+    """Return (column, value). 'col:val' -> (col, val); bare 'val' -> (primary_col, val);
+    blank -> (None, None). Splits on the first colon only."""
+    target = (target or '').strip()
+    if not target:
+        return None, None
+    if ':' in target:
+        col, val = target.split(':', 1)
+        return col.strip(), val.strip()
+    return primary_col, target
+
+
+def _pct(num: int, den: int):
+    return round(100 * num / den, 2) if den else None
+
+
+def build_assay_performance(joined: pd.DataFrame, assay_targets: dict,
+                            primary_col: str) -> pd.DataFrame:
+    """Per-assay sensitivity/specificity/precision against each assay's target.
+
+    target_group is 'column:value' (or bare value -> primary_col). Positive
+    signal = detection_call == 'Detected'. Assays without a target get a roster
+    row with blank metrics. Missing target column -> ValueError; a value matching
+    no assemblies -> warning.
+    """
+    rows = []
+    for assay, grp in joined.groupby('assay'):
+        raw = (assay_targets.get(assay) or '').strip()
+        detected = grp['detection_call'] == 'Detected'
+        n_detected_total = int(detected.sum())
+        col, val = parse_target(raw, primary_col)
+        if col is None:
+            rows.append({
+                'assay': assay, 'target_group': '', 'target_column': '',
+                'n_target': None, 'n_nontarget': None, 'tp': None, 'fn': None,
+                'fp': None, 'tn': None, 'sensitivity': None, 'specificity': None,
+                'precision': None, 'n_detected_total': n_detected_total,
+            })
+            continue
+        if col not in grp.columns:
+            raise ValueError(
+                f"assay '{assay}' target references column '{col}' not in metadata")
+        is_target = grp[col].astype('object') == val
+        n_target = int(is_target.sum())
+        if n_target == 0:
+            print(f"WARNING: assay '{assay}' target '{raw}' matched 0 assemblies "
+                  f"(check spelling / that target genomes are in your dataset).")
+        n_nontarget = int((~is_target).sum())
+        tp = int((is_target & detected).sum())
+        fn = n_target - tp
+        fp = int((~is_target & detected).sum())
+        tn = n_nontarget - fp
+        rows.append({
+            'assay': assay, 'target_group': raw, 'target_column': col,
+            'n_target': n_target, 'n_nontarget': n_nontarget,
+            'tp': tp, 'fn': fn, 'fp': fp, 'tn': tn,
+            'sensitivity': _pct(tp, n_target),
+            'specificity': _pct(tn, n_nontarget),
+            'precision': _pct(tp, tp + fp),
+            'n_detected_total': n_detected_total,
+        })
+    df = pd.DataFrame(rows, columns=ASSAY_PERF_COLS)
+    _count_cols = ['n_target', 'n_nontarget', 'tp', 'fn', 'fp', 'tn', 'n_detected_total']
+    df[_count_cols] = df[_count_cols].astype('Int64')
+    return df
 
 
 def _md5(path: str) -> str:
@@ -194,7 +303,7 @@ def _tool_version(cmd: list) -> str:
         return 'unknown'
 
 
-def write_run_manifest(manifest_path: str, params: dict, assay_table: str) -> None:
+def write_run_manifest(manifest_path: str, params: dict, assay_table: str, counts: dict | None = None) -> None:
     """Write run manifest with parameters, tool versions, and checksums."""
     lines = [
         f"# Run manifest — generated {datetime.now().isoformat()}",
@@ -212,6 +321,10 @@ def write_run_manifest(manifest_path: str, params: dict, assay_table: str) -> No
         "## Checksums",
         f"  assay_table.csv  MD5: {_md5(assay_table)}",
     ]
+    if counts:
+        lines += ["", "## Input accounting"]
+        for k, v in counts.items():
+            lines.append(f"  {k}: {v}")
     Path(manifest_path).write_text('\n'.join(lines) + '\n')
 
 
@@ -221,6 +334,7 @@ def main():
     p.add_argument('--metadata', required=True)
     p.add_argument('--assay-table', required=True)
     p.add_argument('--reports-dir', required=True)
+    p.add_argument('--group-by', nargs='*', default=[])
     p.add_argument('--max-primer-mismatches', type=int, default=2)
     p.add_argument('--prime3-exact-nt', type=int, default=3)
     p.add_argument('--max-probe-mismatches', type=int, default=1)
@@ -240,33 +354,45 @@ def main():
     det = load_detection_results(args.amplicons_dir)
     meta = pd.read_csv(args.metadata, encoding='utf-8-sig')
     joined = join_metadata(det, meta)
+    joined, grouping_cols = compute_grouping(joined, list(args.group_by))
+    primary_col = grouping_cols[0]
 
-    # Per-assay tables
+    # Per-assay tables (dynamic columns)
+    cols = dynamic_per_assay_columns(joined)
     for assay, grp in joined.groupby('assay'):
         sorted_grp = grp.assign(
             _call_order=pd.Categorical(
                 grp['detection_call'], categories=DETECTION_CALL_ORDER, ordered=True
             )
-        ).sort_values('_call_order')[PER_ASSAY_COLS]
+        ).sort_values('_call_order')[cols]
         sorted_grp.to_csv(per_assay / f"{assay}_results.csv", index=False)
 
-    # Species summary — wide species × assay matrix of pct_detected
-    species_summary = build_species_summary(joined)
-    build_species_matrix(species_summary).to_csv(reports / 'species_summary.csv', index=False)
+    # One matrix + heatmap per grouping column; combined long table
+    summaries = []
+    for gcol in grouping_cols:
+        summ = build_group_summary(joined, gcol)
+        summaries.append(summ)
+        matrix = build_group_matrix(summ)
+        matrix.to_csv(reports / f"{gcol}_detection_matrix.csv", index=False)
+        write_group_heatmap(matrix, str(figures), gcol)
+    summary_all = pd.concat(summaries, ignore_index=True) if summaries \
+        else pd.DataFrame(columns=GROUP_SUMMARY_COLS)
 
-    # Assay summary (long) — one row per assay × species_group, all groups incl. misses
-    assay_long = build_assay_summary_long(species_summary)
-    assay_long.to_csv(reports / 'assay_summary_long.csv', index=False)
+    detection_long = build_assay_summary_long(summary_all)
+    detection_long.to_csv(reports / 'detection_summary_long.csv', index=False)
     with pd.ExcelWriter(reports / 'assay_summary.xlsx', engine='openpyxl') as writer:
-        for assay, grp in assay_long.groupby('assay'):
+        for assay, grp in detection_long.groupby('assay'):
             grp.to_excel(writer, sheet_name=str(assay)[:31], index=False)
+
+    # Per-assay sensitivity / specificity
+    assay_targets = load_assay_targets(args.assay_table)
+    build_assay_performance(joined, assay_targets, primary_col).to_csv(
+        reports / 'assay_performance.csv', index=False)
 
     # Per-assembly detection joined with input metadata
     binary = build_detection_matrix(joined)
-    build_detection_by_assembly(binary, meta).to_csv(reports / 'detection_by_assembly.csv', index=False)
-
-    # Species-level heatmap
-    write_species_heatmap(build_species_matrix(species_summary), str(figures))
+    build_detection_by_assembly(binary, meta).to_csv(
+        reports / 'detection_by_assembly.csv', index=False)
 
     # Run manifest
     params = {
@@ -278,7 +404,13 @@ def main():
         'keep_blast': args.keep_blast,
         'keep_logs': args.keep_logs,
     }
-    write_run_manifest(str(reports / 'run_manifest.txt'), params, args.assay_table)
+    counts = {
+        'assemblies_analyzed': int(joined['accession'].nunique()),
+        'metadata_rows': int(len(meta)),
+        'grouping_columns': ", ".join(grouping_cols),
+        'n_assays': int(joined['assay'].nunique()),
+    }
+    write_run_manifest(str(reports / 'run_manifest.txt'), params, args.assay_table, counts=counts)
 
     print(f"Reports written to {args.reports_dir}")
 
