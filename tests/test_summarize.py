@@ -387,8 +387,9 @@ def test_ani_confidence_low_mismatch():
     assert joined.iloc[0]['ani_confidence'] == 'Low'
 
 
-def test_group_summary_separates_genus_match():
-    """Genus-confidence assemblies appear under 'species (genus match)', not the plain species name."""
+def test_group_summary_folds_genus_into_unclassified():
+    """Genus-only assemblies fold into the single 'Unclassified' bucket, not a separate
+    '(genus match)' group; ani_confidence still records 'Genus' per-assembly."""
     det = pd.concat([
         make_detection_df(['GCF_001'], ['VhPath'], call='Detected'),
         make_detection_df(['GCF_002'], ['VhPath'], call='Detected'),
@@ -401,12 +402,14 @@ def test_group_summary_separates_genus_match():
     summary = build_group_summary(joined, 'group')
     groups = set(summary['group'])
     assert 'Vibrio harveyi' in groups
-    assert 'Vibrio harveyi (genus match)' in groups
-    # Each should count only its own assemblies
+    assert 'Vibrio harveyi (genus match)' not in groups
+    assert 'Unclassified (low confidence ANI)' in groups
+    # per-assembly ani_confidence still distinguishes the genus-only assembly
+    assert set(joined['ani_confidence']) == {'High', 'Genus'}
     high = summary[summary['group'] == 'Vibrio harveyi'].iloc[0]
-    genus = summary[summary['group'] == 'Vibrio harveyi (genus match)'].iloc[0]
+    uncl = summary[summary['group'] == 'Unclassified (low confidence ANI)'].iloc[0]
     assert high['n_assemblies'] == 1
-    assert genus['n_assemblies'] == 1
+    assert uncl['n_assemblies'] == 1
 
 
 # --- assay_performance.csv (column:value targets) ---
@@ -574,3 +577,34 @@ def test_summarize_main_end_to_end_multi_group(tmp_path):
     assert perf["sensitivity"] == 100.0 and perf["specificity"] == 100.0
     long = pd.read_csv(reports / "detection_summary_long.csv")
     assert set(long["grouping"]) == {"species", "phenotype"}
+
+
+def test_summarize_main_ani_auto_manifest_tier_counts(tmp_path):
+    """ANI-auto mode (no --group-by): genus folds into Unclassified and the manifest
+    records high/genus/low tier counts."""
+    import subprocess, sys
+    from pathlib import Path as P
+    amps = tmp_path / "amplicons"; amps.mkdir()
+    for acc in ['GCF_001', 'GCF_002', 'GCF_003']:
+        make_detection_df([acc], ['Vmed']).to_csv(amps / f"{acc}.csv", index=False)
+    (tmp_path / "metadata.csv").write_text(
+        "accession,ani_best_match_organism,ani_match_status,ani_taxonomy_check\n"
+        "GCF_001,Vibrio mediterranei,species_match,OK\n"
+        "GCF_002,Vibrio mediterranei,genus_match,OK\n"
+        "GCF_003,Vibrio sp.,mismatch,Inconclusive\n")
+    (tmp_path / "assays.csv").write_text("assay,probe,fwd,rev\nVmed,,F,R\n")
+    reports = tmp_path / "reports"
+    script = P(__file__).parent.parent / "workflow" / "scripts" / "summarize.py"
+    subprocess.run([sys.executable, str(script),
+        "--amplicons-dir", str(amps), "--metadata", str(tmp_path / "metadata.csv"),
+        "--assay-table", str(tmp_path / "assays.csv"), "--reports-dir", str(reports)],
+        check=True)
+    # ANI-auto → single 'group' matrix; genus folds into Unclassified (no separate genus group)
+    groups = set(pd.read_csv(reports / "group_detection_matrix.csv")["group"])
+    assert "Vibrio mediterranei" in groups
+    assert not any("genus match" in g for g in groups)
+    assert "Unclassified (low confidence ANI)" in groups
+    manifest = (reports / "run_manifest.txt").read_text()
+    assert "ani_high_confidence: 1" in manifest
+    assert "ani_genus_only: 1" in manifest
+    assert "ani_low_confidence: 1" in manifest

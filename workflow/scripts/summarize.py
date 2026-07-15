@@ -31,10 +31,12 @@ def _compute_ani_confidence(row) -> str:
 
 
 def _effective_species(row) -> str:
+    # genus_match assemblies fold into the single low-confidence bucket rather than
+    # a separate per-species '(genus match)' group (which doubled the species axis of
+    # every report). ani_confidence still records 'Genus' per-assembly, so the
+    # detail survives in detection_by_assembly.csv and the manifest tier counts.
     if row['ani_confidence'] == 'High':
         return row['ani_best_match_organism']
-    if row['ani_confidence'] == 'Genus':
-        return f"{row['ani_best_match_organism']} (genus match)"
     return 'Unclassified (low confidence ANI)'
 
 
@@ -410,6 +412,13 @@ def main():
         'grouping_columns': ", ".join(grouping_cols),
         'n_assays': int(joined['assay'].nunique()),
     }
+    # In ANI-auto grouping mode, record how many assemblies were species-confident
+    # vs genus-only vs low-confidence (genus/low share the 'Unclassified' group).
+    if 'ani_confidence' in joined.columns:
+        conf = joined.drop_duplicates('accession')['ani_confidence'].value_counts()
+        counts['ani_high_confidence'] = int(conf.get('High', 0))
+        counts['ani_genus_only'] = int(conf.get('Genus', 0))
+        counts['ani_low_confidence'] = int(conf.get('Low', 0))
     write_run_manifest(str(reports / 'run_manifest.txt'), params, args.assay_table, counts=counts)
 
     print(f"Reports written to {args.reports_dir}")
