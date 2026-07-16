@@ -208,11 +208,19 @@ def dynamic_per_assay_columns(joined: pd.DataFrame) -> list:
     return [c for c in ordered if c in joined.columns]
 
 
+# Core columns of assay_performance.csv. Precision (PPV) is deliberately not
+# reported: it is prevalence-dependent, so it moves with dataset composition
+# rather than with assay quality. It stays recoverable as tp / (tp + fp).
 ASSAY_PERF_COLS = [
     'assay', 'target_group', 'target_column', 'n_target', 'n_nontarget',
-    'tp', 'fn', 'fp', 'tn', 'sensitivity', 'specificity', 'precision',
+    'tp', 'fn', 'fp', 'tn', 'sensitivity', 'specificity',
     'n_detected_total',
 ]
+
+# Assay-definition columns carried over from assay_table.csv into
+# assay_performance.csv (each only when present), so the results file is
+# self-contained and needs no cross-referencing back to the assay table.
+ASSAY_CONTEXT_COLS = ['fwd', 'rev', 'probe', 'target_gene']
 
 
 def load_assay_targets(assay_table_path: str) -> dict:
@@ -220,6 +228,24 @@ def load_assay_targets(assay_table_path: str) -> dict:
     with open(assay_table_path, encoding='utf-8-sig') as f:
         rows = list(csv.DictReader(f))
     return {r['assay']: (r.get('target_group') or '').strip() for r in rows}
+
+
+def load_assay_context(assay_table_path: str) -> tuple[dict, list]:
+    """Return ({assay: {col: value}}, present_cols) for the ASSAY_CONTEXT_COLS
+    that exist in the assay table. Absent columns are simply not carried."""
+    with open(assay_table_path, encoding='utf-8-sig') as f:
+        rows = list(csv.DictReader(f))
+    if not rows:
+        return {}, []
+    present = [c for c in ASSAY_CONTEXT_COLS if c in rows[0]]
+    ctx = {r['assay']: {c: (r.get(c) or '') for c in present} for r in rows}
+    return ctx, present
+
+
+def _perf_columns(context_cols) -> list:
+    """Column order: assay | carried assay-definition columns | target + metrics."""
+    return ['assay'] + list(context_cols or []) + \
+        [c for c in ASSAY_PERF_COLS if c != 'assay']
 
 
 def parse_target(target: str, primary_col: str):
@@ -239,26 +265,29 @@ def _pct(num: int, den: int):
 
 
 def build_assay_performance(joined: pd.DataFrame, assay_targets: dict,
-                            primary_col: str) -> pd.DataFrame:
-    """Per-assay sensitivity/specificity/precision against each assay's target.
+                            primary_col: str, assay_context: dict | None = None,
+                            context_cols: list | None = None) -> pd.DataFrame:
+    """Per-assay sensitivity/specificity against each assay's target.
 
     target_group is 'column:value' (or bare value -> primary_col). Positive
     signal = detection_call == 'Detected'. Assays without a target get a roster
     row with blank metrics. Missing target column -> ValueError; a value matching
-    no assemblies -> warning.
+    no assemblies -> warning. assay_context/context_cols carry assay-definition
+    columns (fwd/rev/probe/target_gene) over from the assay table.
     """
     rows = []
     for assay, grp in joined.groupby('assay'):
         raw = (assay_targets.get(assay) or '').strip()
+        ctx = (assay_context or {}).get(assay, {})
         detected = grp['detection_call'] == 'Detected'
         n_detected_total = int(detected.sum())
         col, val = parse_target(raw, primary_col)
         if col is None:
             rows.append({
-                'assay': assay, 'target_group': '', 'target_column': '',
+                'assay': assay, **ctx, 'target_group': '', 'target_column': '',
                 'n_target': None, 'n_nontarget': None, 'tp': None, 'fn': None,
                 'fp': None, 'tn': None, 'sensitivity': None, 'specificity': None,
-                'precision': None, 'n_detected_total': n_detected_total,
+                'n_detected_total': n_detected_total,
             })
             continue
         if col not in grp.columns:
@@ -275,15 +304,14 @@ def build_assay_performance(joined: pd.DataFrame, assay_targets: dict,
         fp = int((~is_target & detected).sum())
         tn = n_nontarget - fp
         rows.append({
-            'assay': assay, 'target_group': raw, 'target_column': col,
+            'assay': assay, **ctx, 'target_group': raw, 'target_column': col,
             'n_target': n_target, 'n_nontarget': n_nontarget,
             'tp': tp, 'fn': fn, 'fp': fp, 'tn': tn,
             'sensitivity': _pct(tp, n_target),
             'specificity': _pct(tn, n_nontarget),
-            'precision': _pct(tp, tp + fp),
             'n_detected_total': n_detected_total,
         })
-    df = pd.DataFrame(rows, columns=ASSAY_PERF_COLS)
+    df = pd.DataFrame(rows, columns=_perf_columns(context_cols))
     _count_cols = ['n_target', 'n_nontarget', 'tp', 'fn', 'fp', 'tn', 'n_detected_total']
     df[_count_cols] = df[_count_cols].astype('Int64')
     return df
@@ -388,7 +416,10 @@ def main():
 
     # Per-assay sensitivity / specificity
     assay_targets = load_assay_targets(args.assay_table)
-    build_assay_performance(joined, assay_targets, primary_col).to_csv(
+    assay_context, context_cols = load_assay_context(args.assay_table)
+    build_assay_performance(joined, assay_targets, primary_col,
+                            assay_context=assay_context,
+                            context_cols=context_cols).to_csv(
         reports / 'assay_performance.csv', index=False)
 
     # Per-assembly detection joined with input metadata

@@ -171,9 +171,12 @@ The assay table is a CSV file with the following columns:
 - Modifications can be noted inline using `/ModName/` or `[ModName]` notation; these are stripped before alignment (e.g., `/56-FAM/ACGT[BHQ1]` → `ACGT`)
 
 **Extra columns:** you may add any additional columns to `assay_table.csv` (e.g.
-`reference`, `notes`, `target_gene`) to keep your work organized. primeval ignores
-them — only `assay`, `fwd`, `rev`, `probe`, and `target_group` are read.
-`assay`, `fwd`, and `rev` are required; `probe` and `target_group` may be blank.
+`reference`, `notes`) to keep your work organized; primeval ignores them. The one
+exception is `target_gene` — if you include it, it is carried through to
+`assay_performance.csv` alongside `fwd`, `rev`, and `probe`, so that results file
+stands on its own. Only `assay`, `fwd`, `rev`, `probe`, `target_group`, and
+`target_gene` are read. `assay`, `fwd`, and `rev` are required; `probe`,
+`target_group`, and `target_gene` may be blank or absent.
 
 Example:
 
@@ -253,7 +256,7 @@ results/<run-name>_<date>/
     ├── {column}_detection_matrix.csv   # one per group_by column: group × assay % detected
     ├── detection_summary_long.csv       # tidy long table: assay × grouping × group (incl. misses)
     ├── assay_summary.xlsx               # same as detection_summary_long, one worksheet per assay
-    ├── assay_performance.csv            # per-assay sensitivity / specificity / precision vs target_group
+    ├── assay_performance.csv            # per-assay sensitivity / specificity vs target_group
     ├── detection_by_assembly.csv        # one row per assembly: metadata + 0/1 per assay
     ├── run_manifest.txt                 # parameters, tool versions, checksums, input accounting
     ├── per_assay/                       # {assay}_results.csv — every assembly's call for one assay
@@ -271,13 +274,11 @@ results/<run-name>_<date>/
 - `detection_summary_long.csv` includes assay × grouping-column × group combinations an
   assay *misses* (`pct_detected = 0`), so you can see both what an assay detects and
   what it doesn't, across every `group_by` column.
-- `assay_performance.csv` reports, per assay with a declared `target_group`, sensitivity
-  (% of target assemblies detected), specificity (% of non-target assemblies correctly
-  not detected), and precision, plus the `target_column` each was scored on. Because
+- `assay_performance.csv` scores each assay against its declared `target_group`. Because
   targets are `column:value`, a nested clade assay (`phenotype:protective`) and a
   species-wide assay (`species:Vibrio mediterranei`) are each scored against the right
-  axis in one run. Assays without a `target_group` (controls) appear with blank metrics.
-  `Primer Only` counts as a non-detection here.
+  axis in one run. See [Interpreting `assay_performance.csv`](#interpreting-assay_performancecsv)
+  for the full column reference and how to read the numbers.
 - `n_multi_amplicon` / `max_amplicons` flag assemblies where an assay produces more than
   one product. Interpretation is target-dependent: for a single-copy target this can
   indicate off-target priming or overestimated abundance, whereas for a multi-copy
@@ -287,6 +288,67 @@ results/<run-name>_<date>/
 - Raw BLAST output and the per-assembly `logs/` directory are intermediate and are
   deleted once a run completes successfully. Set `keep_blast: true` / `keep_logs: true`
   in `config.yaml` to retain them; the top-level `run.log` is always kept.
+
+---
+
+## Interpreting `assay_performance.csv`
+
+For every assay carrying a `target_group`, primeval classifies **each assembly in the run**
+two ways and cross-tabulates them:
+
+- **Truth** — is this assembly in the assay's intended target group? (i.e. does
+  `metadata[target_column]` equal the value in `target_group`?)
+- **Call** — did the assay produce a detection in this assembly? (`detection_call` is `Detected`)
+
+|                         | Detected (in silico)  | Not detected           |
+| ----------------------- | --------------------- | ---------------------- |
+| **In target group**     | `tp` (correct hit)    | `fn` (missed target)   |
+| **Not in target group** | `fp` (off-target hit) | `tn` (correct reject)  |
+
+### Columns
+
+| Column             | Meaning                                                                                                                            |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `assay`            | Assay name, from `assay_table.csv`.                                                                                                |
+| `fwd`, `rev`, `probe` | Carried over verbatim from `assay_table.csv` (including any `/ZEN/`-style modification notation), so the results file is self-contained. |
+| `target_gene`      | Carried over from `assay_table.csv` when you include that optional column.                                                          |
+| `target_group`     | The target exactly as written in the assay table (e.g. `phenotype:protective`).                                                    |
+| `target_column`    | The metadata column the target resolved to (e.g. `phenotype`). A bare value resolves to the primary `group_by` column.             |
+| `n_target`         | Assemblies in the target group (`tp + fn`).                                                                                        |
+| `n_nontarget`      | Assemblies outside the target group (`fp + tn`).                                                                                   |
+| `tp`               | **True positives** — target assemblies the assay detected.                                                                          |
+| `fn`               | **False negatives** — target assemblies the assay failed to detect (i.e. sensitivity gaps).                                        |
+| `fp`               | **False positives** — non-target assemblies the assay detected (i.e. cross-reactivity).                                            |
+| `tn`               | **True negatives** — non-target assemblies the assay correctly did not detect.                                                     |
+| `sensitivity`      | `100 × tp / (tp + fn)` — the % of intended targets the assay detects (assay **inclusivity**).                                       |
+| `specificity`      | `100 × tn / (tn + fp)` — the % of non-targets the assay correctly rejects (assay **exclusivity**).                                  |
+| `n_detected_total` | Every assembly this assay detected in the run (`tp + fp`).                                                                          |
+
+Control/reference assays with a blank `target_group` still get a row, with blank metrics and
+only `n_detected_total` filled, so the file remains a complete roster of every assay. Any rate
+whose denominator is zero is left blank rather than reported as `0` — e.g. a `target_group`
+that matches no assemblies yields `n_target = 0`, a blank `sensitivity`, and a warning in
+`run.log`.
+
+### Reading the numbers
+
+- **These are in silico predictions, not wet-lab performance.** They report whether the primers
+  and probe have acceptable binding sites in each genome under the configured
+  [detection thresholds](#detection-thresholds) — not amplification efficiency, Tm, secondary
+  structure, or partitioning behaviour. Read them as the sequence-level expectation that
+  empirical validation is tested against.
+- **Every denominator is your input assembly set.** `specificity = 100` means "no off-target
+  detections *among the genomes you supplied*," not "no off-targets exist." See
+  [Assay specificity validation](#assay-specificity-validation).
+- **Precision (PPV) is deliberately not reported.** Sensitivity is computed only within the
+  target group and specificity only within the non-target group, so neither depends on how many
+  of each you happened to include. Precision mixes the two, so it tracks dataset composition
+  rather than assay quality — downloading an entire family drives it down purely by adding
+  non-targets, with no change to the assay itself. If you want it for one fixed dataset, it is
+  `tp / (tp + fp)` from the columns above.
+- **`Primer Only` counts as a non-detection** (see [Detection thresholds](#detection-thresholds)),
+  so a probe-based assay that amplifies off-target *without* probe binding is correctly **not**
+  counted as a false positive.
 
 ---
 
@@ -414,9 +476,9 @@ group,n_assemblies,VhPath,VmedA
 Vibrio harveyi,2,100.0,0.0
 Vibrio mediterranei,3,0.0,66.67
 
-# assay_performance.csv (illustrative)
-assay,target_group,target_column,n_target,n_nontarget,tp,fn,fp,tn,sensitivity,specificity,precision,n_detected_total
-VmedA,species:Vibrio mediterranei,species,3,2,2,1,0,2,66.67,100.0,100.0,2
+# assay_performance.csv (illustrative; fwd/rev/probe truncated here for readability)
+assay,fwd,rev,probe,target_group,target_column,n_target,n_nontarget,tp,fn,fp,tn,sensitivity,specificity,n_detected_total
+VmedA,GCTACGCCC…,GCGCGTGAT…,ACGACCTTC…,species:Vibrio mediterranei,species,3,2,2,1,0,2,66.67,100.0,2
 ```
 
 ---

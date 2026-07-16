@@ -533,6 +533,62 @@ def test_build_assay_performance_missing_column_raises():
         build_assay_performance(joined, {"A": "nope:x"}, "species")
 
 
+def test_load_assay_context_present_and_absent_columns(tmp_path):
+    """Only ASSAY_CONTEXT_COLS actually present in the assay table are carried."""
+    from summarize import load_assay_context
+    p = tmp_path / "assays.csv"
+    p.write_text(
+        "assay,probe,fwd,rev,target_gene,notes\n"
+        "A,PPP,FFF,RRR,gyrB,some note\n")
+    ctx, present = load_assay_context(str(p))
+    # order follows ASSAY_CONTEXT_COLS; 'notes' is not carried
+    assert present == ["fwd", "rev", "probe", "target_gene"]
+    assert ctx["A"] == {"fwd": "FFF", "rev": "RRR", "probe": "PPP", "target_gene": "gyrB"}
+
+    p2 = tmp_path / "assays2.csv"
+    p2.write_text("assay,probe,fwd,rev\nA,,FFF,RRR\n")   # no target_gene
+    ctx2, present2 = load_assay_context(str(p2))
+    assert present2 == ["fwd", "rev", "probe"]
+    assert ctx2["A"] == {"fwd": "FFF", "rev": "RRR", "probe": ""}
+
+
+def test_build_assay_performance_carries_assay_context():
+    """Assay-definition columns land between 'assay' and the target/metric columns."""
+    joined = pd.DataFrame([
+        {"accession": "a1", "assay": "A", "species": "t", "detection_call": "Detected"},
+        {"accession": "a2", "assay": "Ctrl", "species": "t", "detection_call": "Detected"},
+    ])
+    ctx = {
+        "A": {"fwd": "FFF", "rev": "RRR", "probe": "PPP", "target_gene": "gyrB"},
+        "Ctrl": {"fwd": "F2", "rev": "R2", "probe": "", "target_gene": ""},
+    }
+    cols = ["fwd", "rev", "probe", "target_gene"]
+    perf = build_assay_performance(
+        joined, {"A": "species:t", "Ctrl": ""}, "species",
+        assay_context=ctx, context_cols=cols)
+    assert list(perf.columns) == [
+        "assay", "fwd", "rev", "probe", "target_gene", "target_group", "target_column",
+        "n_target", "n_nontarget", "tp", "fn", "fp", "tn",
+        "sensitivity", "specificity", "n_detected_total",
+    ]
+    a = perf[perf["assay"] == "A"].iloc[0]
+    assert a["fwd"] == "FFF" and a["probe"] == "PPP" and a["target_gene"] == "gyrB"
+    assert a["sensitivity"] == 100.0
+    # context is carried for blank-target control rows too
+    c = perf[perf["assay"] == "Ctrl"].iloc[0]
+    assert c["fwd"] == "F2" and pd.isna(c["sensitivity"])
+
+
+def test_build_assay_performance_no_precision_column():
+    """Precision (PPV) is deliberately not reported; tp/fp remain so it stays derivable."""
+    joined = pd.DataFrame([
+        {"accession": "a1", "assay": "A", "species": "t", "detection_call": "Detected"},
+    ])
+    perf = build_assay_performance(joined, {"A": "species:t"}, "species")
+    assert "precision" not in perf.columns
+    assert {"tp", "fp"} <= set(perf.columns)
+
+
 def test_build_assay_performance_zero_match_target_warns(capsys):
     """A target that matches no assemblies emits a warning and NA metrics."""
     joined = pd.DataFrame([
