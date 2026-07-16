@@ -163,20 +163,34 @@ The assay table is a CSV file with the following columns:
 | `assay` | Yes      | Unique assay name (used in all output files)                                              |
 | `fwd`   | Yes      | Forward primer sequence (5′→3′)                                                           |
 | `rev`   | Yes      | Reverse primer sequence (5′→3′, same orientation as fwd - primeval handles RC internally) |
-| `probe` | No       | Probe sequence (5′→3′). Leave empty for probe-free (SYBR) assays                          |
-| `target_group` | No | The metadata group this assay is designed to detect, as `column:value` (e.g. `phenotype:protective`, `species:Vibrio mediterranei`). A bare value (no colon) is matched against the primary `group_by` column. Drives `assay_performance.csv`. Leave blank for control/reference assays. |
+| `probe` | Column yes, value no | Probe sequence (5′→3′). The **column must be present**, but leave the value empty to declare a probe-free (SYBR/dsDNA-dye) assay — see [Probe-free assays](#probe-free-assays). |
+| `target_group` | No (column may be omitted) | The metadata group this assay is designed to detect, as `column:value` (e.g. `phenotype:protective`, `species:Vibrio mediterranei`). A bare value (no colon) is matched against the primary `group_by` column. Drives `assay_performance.csv`. Leave blank for control/reference assays. |
+| `target_gene` | No (column may be omitted) | Free-text gene/target label. Not used in detection; carried through to `assay_performance.csv` if present. |
 
 **Sequence notation:**
 - Standard IUPAC ambiguity codes are supported (R, Y, S, W, K, M, B, D, H, V, N)
 - Modifications can be noted inline using `/ModName/` or `[ModName]` notation; these are stripped before alignment (e.g., `/56-FAM/ACGT[BHQ1]` → `ACGT`)
 
+**Which columns must exist:** the `assay`, `fwd`, `rev`, and `probe` columns must **all be
+present** — the run fails with `Assay table missing required columns` if any is absent. Only
+`probe` may carry an empty *value* (that is how you declare a probe-free assay); `assay`,
+`fwd`, and `rev` need real values. The `target_group` and `target_gene` columns are optional
+and may be omitted entirely.
+
 **Extra columns:** you may add any additional columns to `assay_table.csv` (e.g.
 `reference`, `notes`) to keep your work organized; primeval ignores them. The one
 exception is `target_gene` — if you include it, it is carried through to
 `assay_performance.csv` alongside `fwd`, `rev`, and `probe`, so that results file
-stands on its own. Only `assay`, `fwd`, `rev`, `probe`, `target_group`, and
-`target_gene` are read. `assay`, `fwd`, and `rev` are required; `probe`,
-`target_group`, and `target_gene` may be blank or absent.
+stands on its own.
+
+### Probe-free assays
+
+Leave `probe` empty for SYBR/dsDNA-dye chemistry. primeval then requires only a valid
+amplicon to call a detection: no probe oligo is searched, and the `Primer Only` call is
+structurally unreachable for that assay — any valid amplicon is `Detected`, and
+`Not Detected` means no valid amplicon was found. This mirrors the chemistry, where any
+double-stranded product fluoresces. Note the consequence for cross-assay comparison,
+described under [Reading the numbers](#reading-the-numbers).
 
 Example:
 
@@ -185,6 +199,10 @@ assay,probe,fwd,rev,target_group
 Assay1,ACGGGACAAAAAGGATGGCGAGTAC,AGCCGAGCGTTACCAGC,CGAACGCAATGATTCTCTGAGC,species:Vibrio mediterranei
 Assay2,,GCTACGCCCTCCATCATCC,GCGCGTGATTATCTGATAGC,
 ```
+
+`Assay1` is probe-based and scored against a target group. `Assay2` has an empty `probe`
+(probe-free) and an empty `target_group`, so it is reported but not scored — the pattern for
+a control or reference assay.
 
 ---
 
@@ -349,6 +367,12 @@ that matches no assemblies yields `n_target = 0`, a blank `sensitivity`, and a w
 - **`Primer Only` counts as a non-detection** (see [Detection thresholds](#detection-thresholds)),
   so a probe-based assay that amplifies off-target *without* probe binding is correctly **not**
   counted as a false positive.
+- **Probe-based and probe-free assays are not directly comparable.** A probe-free
+  ([SYBR/dsDNA-dye](#probe-free-assays)) assay scores a detection on two binding sites; a
+  probe-based assay needs three. All else equal that gives probe-free assays systematically
+  *higher* apparent sensitivity and *lower* apparent specificity — they are clearing a lower
+  bar, not necessarily performing better. The `probe` column carried into this file tells you
+  which is which (blank = probe-free), so compare like with like.
 
 ---
 
