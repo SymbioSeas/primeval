@@ -65,16 +65,15 @@ conda activate primeval
 
 The pipeline runs inside this activated environment; the Snakemake profiles set
 `use-conda: false` so no per-rule environments are built. Creating the
-environment also installs three commands onto your PATH — **`primeval`** (the
+environment also installs three commands onto your PATH: **`primeval`** (the
 pipeline), **`assay-design`** (the companion tool), and **`download-assemblies`**
-(the assembly-download helper) — each runnable from any directory.
+(the assembly-download helper).
 
 ## Quick start
 
 ### 1. Download assemblies
 
-Use the `download-assemblies` command (installed with the environment; runnable
-from any directory) to download RefSeq assemblies for your taxon of interest:
+Use the `download-assemblies` command to download RefSeq assemblies for your taxon of interest:
 
 ```bash
 download-assemblies -t "Vibrionaceae" -o assemblies/
@@ -85,7 +84,7 @@ This downloads all RefSeq assemblies (complete through contig level) for the spe
 ### 2. Configure the pipeline
 
 Copy the config template into your analysis directory (the folder holding your
-`assemblies/`, where results will be written) and edit the copy to point at your
+`assemblies/`, where results will be written) and edit the copied config to point at your
 assemblies and set detection thresholds:
 
 ```bash
@@ -104,7 +103,7 @@ max_probe_mismatches: 1             # mismatches allowed in probe
 max_amplicon_size: 500              # maximum amplicon size (bp)
 
 # group_by: metadata column(s) used to group assemblies in the reports (a
-# detection matrix + heatmap is written per column). Optional — leave unset to
+# detection matrix + heatmap is written per column). Optional: leave unset to
 # auto-group by NCBI ANI-derived species (requires metadata from
 # download-assemblies). See "Metadata format" below.
 # group_by: "species"
@@ -161,10 +160,10 @@ The assay table is a CSV file with the following columns:
 | Column  | Required | Description                                                                               |
 | ------- | -------- | ----------------------------------------------------------------------------------------- |
 | `assay` | Yes      | Unique assay name (used in all output files)                                              |
-| `fwd`   | Yes      | Forward primer sequence (5′→3′)                                                           |
-| `rev`   | Yes      | Reverse primer sequence (5′→3′, same orientation as fwd - primeval handles RC internally) |
-| `probe` | Column yes, value no | Probe sequence (5′→3′). The **column must be present**, but leave the value empty to declare a probe-free (SYBR/dsDNA-dye) assay — see [Probe-free assays](#probe-free-assays). |
-| `target_group` | No (column may be omitted) | The metadata group this assay is designed to detect, as `column:value` (e.g. `phenotype:protective`, `species:Vibrio mediterranei`). A bare value (no colon) is matched against the primary `group_by` column. Drives `assay_performance.csv`. Leave blank for control/reference assays. |
+| `fwd`   | Yes      | Forward primer sequence (5′-3′)                                                           |
+| `rev`   | Yes      | Reverse primer sequence (5′-3′, same orientation as fwd - primeval handles RC internally) |
+| `probe` | Column yes, value no | Probe sequence (5′-3′). The **column must be present**, but leave the value empty to declare a probe-free (SYBR/dsDNA-dye) assay. See [Probe-free assays](#probe-free-assays). |
+| `target_group` | No (column may be omitted) | The metadata group this assay is designed to detect, as `column:value` (e.g. `phenotype:protective`, `species:Vibrio mediterranei`). A bare value (no colon) is matched against the primary `group_by` column. Drives `assay_performance.csv`. |
 | `target_gene` | No (column may be omitted) | Free-text gene/target label. Not used in detection; carried through to `assay_performance.csv` if present. |
 
 **Sequence notation:**
@@ -172,7 +171,7 @@ The assay table is a CSV file with the following columns:
 - Modifications can be noted inline using `/ModName/` or `[ModName]` notation; these are stripped before alignment (e.g., `/56-FAM/ACGT[BHQ1]` → `ACGT`)
 
 **Which columns must exist:** the `assay`, `fwd`, `rev`, and `probe` columns must **all be
-present** — the run fails with `Assay table missing required columns` if any is absent. Only
+present**. The run fails with `Assay table missing required columns` if any is absent. Only
 `probe` may carry an empty *value* (that is how you declare a probe-free assay); `assay`,
 `fwd`, and `rev` need real values. The `target_group` and `target_gene` columns are optional
 and may be omitted entirely.
@@ -180,14 +179,13 @@ and may be omitted entirely.
 **Extra columns:** you may add any additional columns to `assay_table.csv` (e.g.
 `reference`, `notes`) to keep your work organized; primeval ignores them. The one
 exception is `target_gene` — if you include it, it is carried through to
-`assay_performance.csv` alongside `fwd`, `rev`, and `probe`, so that results file
-stands on its own.
+`assay_performance.csv` alongside `fwd`, `rev`, and `probe` to make your life easier.
 
 ### Probe-free assays
 
 Leave `probe` empty for SYBR/dsDNA-dye chemistry. primeval then requires only a valid
 amplicon to call a detection: no probe oligo is searched, and the `Primer Only` call is
-structurally unreachable for that assay — any valid amplicon is `Detected`, and
+structurally unreachable for that assay. Any valid amplicon is `Detected`, and
 `Not Detected` means no valid amplicon was found. This mirrors the chemistry, where any
 double-stranded product fluoresces. Note the consequence for cross-assay comparison,
 described under [Reading the numbers](#reading-the-numbers).
@@ -201,8 +199,7 @@ Assay2,,GCTACGCCCTCCATCATCC,GCGCGTGATTATCTGATAGC,
 ```
 
 `Assay1` is probe-based and scored against a target group. `Assay2` has an empty `probe`
-(probe-free) and an empty `target_group`, so it is reported but not scored — the pattern for
-a control or reference assay.
+(probe-free) and an empty `target_group`, so it is reported but not scored.
 
 ---
 
@@ -218,11 +215,11 @@ group_by: "species"                 # single grouping
 group_by: ["species", "phenotype"]  # a detection matrix + heatmap per column
 ```
 
-Grouping-column **names** must not contain whitespace — use e.g. `isolation_source`, not `isolation source`.
+Grouping-column **names** must not contain whitespace (use e.g. `isolation_source`, not `isolation source`).
 
-If you used `download-assemblies`, the generated `metadata.csv` carries NCBI ANI/BioSample fields and primeval **auto-groups by ANI-derived species** when `group_by` is unset — no configuration needed. If you bring your own `metadata.csv` without those NCBI columns, you must set `group_by`. When you set `group_by`, assemblies missing from `metadata.csv` or with an empty cell in a grouping column are still analyzed and reported under `Ungrouped`. In the default ANI-auto mode (no `group_by`), only species-confident assemblies get their own group; assemblies that are only genus-resolvable, unclassified, or otherwise low-confidence fold into a single `Unclassified (low confidence ANI)` group. Each assembly's tier is still retained per-assembly as `ani_confidence` (`High`/`Genus`/`Low`) in `detection_by_assembly.csv`, and the run manifest reports the high/genus/low counts.
+If you used `download-assemblies`, the generated `metadata.csv` carries NCBI ANI/BioSample fields and primeval **auto-groups by ANI-derived species** when `group_by` is unset. If you bring your own `metadata.csv` without those NCBI columns, you must set `group_by`. When you set `group_by`, assemblies missing from `metadata.csv` or with an empty cell in a grouping column are still analyzed and reported under `Ungrouped`. In the default ANI-auto mode (no `group_by`), only species-confident assemblies get their own group; assemblies that are only genus-resolvable, unclassified, or otherwise low-confidence fold into a single `Unclassified (low confidence ANI)` group. Each assembly's tier is still retained per-assembly as `ani_confidence` (`High`/`Genus`/`Low`) in `detection_by_assembly.csv`, and the run manifest reports the high/genus/low counts.
 
-Because grouping columns are independent, an assay can be scored against a different resolution than the one used to lay out a matrix — e.g. group the report by `species` while scoring a nested clade assay with `target_group: phenotype:protective`.
+Because grouping columns are independent, an assay can be scored against a different resolution than the one used to lay out a matrix (e.g. group the report by `species` while scoring a nested clade assay with `target_group: phenotype:protective`).
 
 Example minimal metadata:
 ```
@@ -352,26 +349,19 @@ that matches no assemblies yields `n_target = 0`, a blank `sensitivity`, and a w
 
 - **These are in silico predictions, not wet-lab performance.** They report whether the primers
   and probe have acceptable binding sites in each genome under the configured
-  [detection thresholds](#detection-thresholds) — not amplification efficiency, Tm, secondary
+  [detection thresholds](#detection-thresholds). Primeval does NOT test amplification efficiency, Tm, secondary
   structure, or partitioning behaviour. Read them as the sequence-level expectation that
   empirical validation is tested against.
 - **Every denominator is your input assembly set.** `specificity = 100` means "no off-target
   detections *among the genomes you supplied*," not "no off-targets exist." See
   [Assay specificity validation](#assay-specificity-validation).
-- **Precision (PPV) is deliberately not reported.** Sensitivity is computed only within the
-  target group and specificity only within the non-target group, so neither depends on how many
-  of each you happened to include. Precision mixes the two, so it tracks dataset composition
-  rather than assay quality — downloading an entire family drives it down purely by adding
-  non-targets, with no change to the assay itself. If you want it for one fixed dataset, it is
-  `tp / (tp + fp)` from the columns above.
 - **`Primer Only` counts as a non-detection** (see [Detection thresholds](#detection-thresholds)),
   so a probe-based assay that amplifies off-target *without* probe binding is correctly **not**
   counted as a false positive.
 - **Probe-based and probe-free assays are not directly comparable.** A probe-free
   ([SYBR/dsDNA-dye](#probe-free-assays)) assay scores a detection on two binding sites; a
   probe-based assay needs three. All else equal that gives probe-free assays systematically
-  *higher* apparent sensitivity and *lower* apparent specificity — they are clearing a lower
-  bar, not necessarily performing better. The `probe` column carried into this file tells you
+  *higher* apparent sensitivity and *lower* apparent specificity. The `probe` column carried into this file tells you
   which is which (blank = probe-free), so compare like with like.
 
 ---
@@ -379,9 +369,7 @@ that matches no assemblies yields `n_target = 0`, a blank `sensitivity`, and a w
 ## Downloading assemblies
 
 `download-assemblies` is installed with the environment and runs from any
-directory. (Equivalently, you can run the script directly with
-`bash /path/to/primeval/scripts/download/download_assemblies.sh …` — the command
-is just a thin wrapper around it.)
+directory.
 
 ### Basic usage
 
@@ -461,7 +449,7 @@ This two-stage approach is computationally efficient, such that you only downloa
 
 Step 1 is a manual pre-screen performed through the NCBI web interface; it is not part of the reproducible primeval pipeline. The reproducible specificity evidence for a manuscript comes from primeval's `assay_performance.csv` over your assembled dataset (Step 2 onward).
 
-> **Planned feature:** A future release will support BLASTing directly against NCBI pre-built reference databases (e.g., `ref_prok_rep_genomes`) as a single-step broader specificity check, without requiring manual assembly downloads.
+> **In the future:** A future release will support BLASTing directly against NCBI pre-built reference databases (e.g., `ref_prok_rep_genomes`) as a single-step broader specificity check, without requiring manual assembly downloads.
 
 ---
 
@@ -491,16 +479,15 @@ The test dataset covers all detection scenarios: `Detected` (including via minus
 ### Example output
 
 With `group_by: "species"` set and a `target_group` of `species:Vibrio mediterranei`
-declared for assay `VmedA`, the reports look like this (illustrative, not the actual
-test-dataset numbers):
+declared for assay `VmedA`, the report format looks like this:
 
 ```
-# species_detection_matrix.csv (illustrative)
+# species_detection_matrix.csv
 group,n_assemblies,VhPath,VmedA
 Vibrio harveyi,2,100.0,0.0
 Vibrio mediterranei,3,0.0,66.67
 
-# assay_performance.csv (illustrative; fwd/rev/probe truncated here for readability)
+# assay_performance.csv
 assay,fwd,rev,probe,target_group,target_column,n_target,n_nontarget,tp,fn,fp,tn,sensitivity,specificity,n_detected_total
 VmedA,GCTACGCCC…,GCGCGTGAT…,ACGACCTTC…,species:Vibrio mediterranei,species,3,2,2,1,0,2,66.67,100.0,2
 ```
@@ -526,7 +513,7 @@ assay-design \
     --output-dir      results
 ```
 
-A tiny, ready-to-run worked example lives in
+A tiny, worked example lives in
 [`assay-design/example/`](assay-design/example/). For inputs, thresholds, and
 full usage, see the [assay-design README](assay-design/README.md).
 
@@ -534,7 +521,7 @@ full usage, see the [assay-design README](assay-design/README.md).
 
 ## Citation
 
-If you use primeval, please cite the archived release (DOI via Zenodo — added at manuscript submission):
+If you use primeval, please cite the archived release (TBD!):
 
 > Smith S, et al. (2026) *[manuscript title]*. *[journal]*. doi:[doi]
 > primeval [version] (2026). Zenodo. doi:[zenodo-doi]
