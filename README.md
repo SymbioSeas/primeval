@@ -26,12 +26,8 @@ and **`assay-design`**. Run either with `--help`.
 
 ## Requirements
 
-- [Conda](https://docs.conda.io/en/latest/) or [Mamba](https://mamba.readthedocs.io/)
-- [NCBI datasets CLI](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/download-and-install/) (for downloading assemblies)
-- To install NCBI datasets CLI with conda:
-```
-conda install -c conda-forge ncbi-datasets-cli
-```
+- [Conda](https://docs.conda.io/en/latest/) or [Mamba](https://mamba.readthedocs.io/) — all dependencies (including the `datasets` CLI) are installed by `environment.yaml`; no separate steps needed.
+- **Platforms:** Linux and macOS natively; **Windows via [WSL2](#installing-on-windows)**. primeval depends on NCBI BLAST+ from Bioconda, which builds only for Linux and macOS, so on Windows you run it inside a WSL2 Linux environment.
 
 ## System requirements
 
@@ -61,13 +57,69 @@ git clone https://github.com/SymbioSeas/primeval.git
 cd primeval
 conda env create -f environment.yaml
 conda activate primeval
+pip install -e .
 ```
 
 The pipeline runs inside this activated environment; the Snakemake profiles set
-`use-conda: false` so no per-rule environments are built. Creating the
-environment also installs three commands onto your PATH: **`primeval`** (the
-pipeline), **`assay-design`** (the companion tool), and **`download-assemblies`**
+`use-conda: false` so no per-rule environments are built. The `pip install -e .`
+step installs the package and puts three commands onto your PATH: **`primeval`**
+(the pipeline), **`assay-design`** (the companion tool), and **`download-assemblies`**
 (the assembly-download helper).
+
+`environment.yaml` uses lower-bound version floors so it resolves across
+platforms and over time. For a bit-for-bit reproducible install, use the lock
+file instead (see [Reproducible installs](#reproducible-installs)).
+
+### Installing on Windows
+
+primeval runs on Windows through **WSL2** (Windows Subsystem for Linux), which
+provides a real Linux environment. Native Windows is not supported because NCBI
+BLAST+ is distributed for Linux/macOS only via Bioconda.
+
+1. Install WSL2 and a Linux distribution (e.g. Ubuntu) — in an admin PowerShell:
+   ```powershell
+   wsl --install
+   ```
+   then reboot and finish the Ubuntu first-run setup. (See Microsoft's
+   [WSL install guide](https://learn.microsoft.com/windows/wsl/install).)
+2. **Inside the WSL/Ubuntu shell**, install Miniforge (conda):
+   ```bash
+   wget "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
+   bash Miniforge3-Linux-x86_64.sh
+   ```
+3. From that same Linux shell, follow the standard [Installation](#installation)
+   steps above. Everything else in this README then applies unchanged — you are
+   running Linux.
+
+Keep your data and the repository **inside the WSL filesystem** (e.g. under
+`~/`), not on the mounted Windows `/mnt/c/...` drive, for much faster BLAST I/O.
+
+### Reproducible installs
+
+`environment.yaml` is the portable, floor-pinned install. For an exact,
+pinned-to-the-build reproduction (e.g. to match a manuscript run), a
+[conda-lock](https://github.com/conda/conda-lock) file is provided covering
+`linux-64`, `osx-64`, and `osx-arm64` (the platforms Bioconda builds for; use
+`linux-64` under WSL2 on Windows):
+
+```bash
+conda install -n base -c conda-forge conda-lock   # once
+conda-lock install -n primeval conda-lock.yml     # exact, pinned dependencies
+conda activate primeval
+pip install -e .                                  # put the primeval commands on PATH
+```
+
+The lock pins the dependency graph; the `pip install -e .` step installs the
+primeval commands themselves from the repo (the `environment.yaml` path does this
+for you). Regenerate the lock after editing `environment.yaml` with:
+
+```bash
+conda-lock lock -f environment.yaml -p linux-64 -p osx-64 -p osx-arm64
+```
+
+(`conda-lock` locks only Conda/PyPI package specs, so the `--editable .` entry in
+`environment.yaml` is expected to be absent from the lock — hence the explicit
+`pip install -e .` above.)
 
 ## Quick start
 

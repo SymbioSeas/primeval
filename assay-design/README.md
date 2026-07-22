@@ -26,10 +26,11 @@ Uses primeval's single top-level environment, so no separate install is required
 cd primeval
 conda env create -f environment.yaml   # if not already created
 conda activate primeval
+pip install -e .                       # if not already installed
 ```
 
-Activating this environment puts both the `primeval` and `assay-design` commands
-on your PATH. Only `python`, `pandas`, and `numpy` are needed for this tool (all
+Installing the package puts both the `primeval` and `assay-design` commands on
+your PATH. Only `python`, `pandas`, and `numpy` are needed for this tool (all
 included in that environment).
 
 ## Inputs

@@ -1,25 +1,37 @@
 name: primeval
+# conda-forge is listed first (bioconda's recommended channel priority), then
+# bioconda. The 'defaults' (anaconda) channel is intentionally omitted: this
+# stack resolves entirely from conda-forge + bioconda, and omitting defaults
+# avoids its terms-of-service solve gate.
+#
+# Dependencies use lower-bound floors rather than exact pins so the environment
+# resolves across platforms (Linux, macOS, and Linux-on-Windows via WSL2). Note
+# that bioconda builds are Linux/macOS only, so `blast` is not available on
+# native Windows — use WSL2 on Windows (see the README "Installing on Windows").
+# For an exact, reproducible install, use the generated lock file instead
+# (see conda-lock.yml and the README).
 channels:
-  - bioconda
   - conda-forge
-  - defaults
+  - bioconda
 dependencies:
   - python=3.11.*
-  # Pipeline (Tool 1)
-  - blast=2.16.*
-  - snakemake-minimal=8.30.*
-  - snakemake-executor-plugin-slurm=1.4.*
-  - ncbi-datasets-cli=18.*   # `datasets` CLI, used by the assembly download helpers
-  - biopython=1.87.*
-  - seaborn=0.13.*
-  - matplotlib=3.11.*
-  - openpyxl=3.1.*
-  # Shared (both tools)
-  - pandas=3.0.*
+  # ── Pipeline ────────────────────────────────────────────────────────────────
+  - blast>=2.15                      # bioconda: Linux/macOS only (Windows -> WSL2)
+  - snakemake-minimal>=8.20,<9
+  - snakemake-executor-plugin-slurm>=1.0   # only used for SLURM/HPC runs; harmless elsewhere
+  - ncbi-datasets-cli>=16            # `datasets` CLI, used by the assembly download helpers
+  - biopython>=1.80                  # only SeqIO.parse is used
+  # ── Reporting ───────────────────────────────────────────────────────────────
+  - matplotlib-base>=3.7             # -base avoids the Qt/pyside6 GUI stack (plots are headless, Agg)
+  - seaborn>=0.13
+  - openpyxl>=3.1
+  # ── Shared ──────────────────────────────────────────────────────────────────
+  - pandas>=2.1,<3                   # DataFrame.map (used in summarize.py) requires >= 2.1
   - numpy
-  # Testing
-  - pytest=9.1.*
-  # Install the primeval CLI onto PATH (editable, from the repo root)
+  # ── Testing ─────────────────────────────────────────────────────────────────
+  - pytest>=8
+  # pip is used for the editable install of primeval itself, done as a separate
+  # step after the environment is created (`pip install -e .`; see the README).
+  # It is kept out of this file so the same spec drives the conda-lock file,
+  # which cannot express a local editable install.
   - pip
-  - pip:
-      - --editable .
