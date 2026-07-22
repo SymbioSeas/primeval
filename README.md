@@ -1,6 +1,6 @@
 # primeval: in silico PCR assay validation
 
-**primeval** evaluates the sensitivity and specificity of PCR assays (including probe-based assays designed for ddPCR/qPCR) against a user-provided set of genome assemblies. For each assay, it identifies valid amplicons using BLAST-based primer alignment and reports detection calls, mismatch counts, and amplicon sizes per assembly.
+**primeval** evaluates the sensitivity and specificity of PCR assays (including probe-based assays designed for dPCR/qPCR) against a user-provided set of genome assemblies. For each assay, it identifies valid amplicons using BLAST-based primer alignment and reports detection calls, mismatch counts, and amplicon sizes per assembly.
 
 ## Two tools in this repository
 
@@ -17,7 +17,7 @@ and **`assay-design`**. Run either with `--help`.
 ## Features
 
 - Evaluates primer and probe binding across a user-provided set of genome assemblies
-- Supports probe-based assays (hydrolysis probes, e.g., ddPCR/qPCR) and probe-free assays (SYBR/dsDNA)
+- Supports probe-based assays (hydrolysis probes, e.g., dPCR/qPCR) and probe-free assays (SYBR/dsDNA)
 - IUPAC degenerate base support in all primer and probe sequences
 - Handles primer binding on either strand of an assembly
 - Configurable mismatch tolerances and 3′-exact match requirements
@@ -26,12 +26,12 @@ and **`assay-design`**. Run either with `--help`.
 
 ## Requirements
 
-- [Conda](https://docs.conda.io/en/latest/) or [Mamba](https://mamba.readthedocs.io/) — all dependencies (including the `datasets` CLI) are installed by `environment.yaml`; no separate steps needed.
-- **Platforms:** Linux and macOS natively; **Windows via [WSL2](#installing-on-windows)**. primeval depends on NCBI BLAST+ from Bioconda, which builds only for Linux and macOS, so on Windows you run it inside a WSL2 Linux environment.
+- [Conda](https://docs.conda.io/en/latest/) or [Mamba](https://mamba.readthedocs.io/) — all dependencies (including the `datasets` CLI) are installed by `environment.yaml`.
+- **Platforms:** Linux and macOS natively; Windows via [WSL2](#installing-on-windows).
 
 ## System requirements
 
-Disk and memory scale with the number and size of input assemblies. Estimates
+Disk and memory usage scale with the number and size of input assemblies. Estimates
 below are from the manuscript's *Vibrionaceae* runs (RefSeq assemblies average
 ~5 MB each). Raw BLAST output is the dominant transient cost; with the default
 `keep_blast: false` it is deleted as the run proceeds.
@@ -62,13 +62,9 @@ pip install -e .
 
 The pipeline runs inside this activated environment; the Snakemake profiles set
 `use-conda: false` so no per-rule environments are built. The `pip install -e .`
-step installs the package and puts three commands onto your PATH: **`primeval`**
-(the pipeline), **`assay-design`** (the companion tool), and **`download-assemblies`**
-(the assembly-download helper).
+step installs the package and puts three commands onto your PATH: **`primeval`**, 
+**`assay-design`**, and **`download-assemblies`** (the assembly-download helper).
 
-`environment.yaml` uses lower-bound version floors so it resolves across
-platforms and over time. For a bit-for-bit reproducible install, use the lock
-file instead (see [Reproducible installs](#reproducible-installs)).
 
 ### Installing on Windows
 
@@ -91,35 +87,9 @@ BLAST+ is distributed for Linux/macOS only via Bioconda.
    steps above. Everything else in this README then applies unchanged — you are
    running Linux.
 
-Keep your data and the repository **inside the WSL filesystem** (e.g. under
+Note: Keep your data and the repository **inside the WSL filesystem** (e.g. under
 `~/`), not on the mounted Windows `/mnt/c/...` drive, for much faster BLAST I/O.
 
-### Reproducible installs
-
-`environment.yaml` is the portable, floor-pinned install. For an exact,
-pinned-to-the-build reproduction (e.g. to match a manuscript run), a
-[conda-lock](https://github.com/conda/conda-lock) file is provided covering
-`linux-64`, `osx-64`, and `osx-arm64` (the platforms Bioconda builds for; use
-`linux-64` under WSL2 on Windows):
-
-```bash
-conda install -n base -c conda-forge conda-lock   # once
-conda-lock install -n primeval conda-lock.yml     # exact, pinned dependencies
-conda activate primeval
-pip install -e .                                  # put the primeval commands on PATH
-```
-
-The lock pins the dependency graph; the `pip install -e .` step installs the
-primeval commands themselves from the repo (the `environment.yaml` path does this
-for you). Regenerate the lock after editing `environment.yaml` with:
-
-```bash
-conda-lock lock -f environment.yaml -p linux-64 -p osx-64 -p osx-arm64
-```
-
-(`conda-lock` locks only Conda/PyPI package specs, so the `--editable .` entry in
-`environment.yaml` is expected to be absent from the lock — hence the explicit
-`pip install -e .` above.)
 
 ## Quick start
 
@@ -240,7 +210,7 @@ amplicon to call a detection: no probe oligo is searched, and the `Primer Only` 
 structurally unreachable for that assay. Any valid amplicon is `Detected`, and
 `Not Detected` means no valid amplicon was found. This mirrors the chemistry, where any
 double-stranded product fluoresces. Note the consequence for cross-assay comparison,
-described under [Reading the numbers](#reading-the-numbers).
+described under [Interpretation](#interpretation).
 
 Example:
 
@@ -292,18 +262,18 @@ primeval reports a detection call per assay per assembly using thresholds set in
 | `max_primer_mismatches` | 2       | A primer with one or two **internal** mismatches still typically primes efficiently; this tolerates strain-level SNPs while excluding poor binders. Counted IUPAC-aware (a degenerate base matches any of its represented bases). |
 | `prime3_exact_nt`       | 3       | Mismatches at the 3′ terminus inhibit polymerase extension, so the last several bases must match exactly regardless of `max_primer_mismatches`.                                                                                   |
 | `max_probe_mismatches`  | 1       | Used for probe-based assays only. Hydrolysis probes tolerate less mismatch than primers, so the default is stricter.                                                                                                              |
-| `max_amplicon_size`     | 500     | Typical qPCR/ddPCR amplicons are ~70–200 bp; 500 bp captures valid products while rejecting spurious long-range primer pairings.                                                                                                  |
+| `max_amplicon_size`     | 500     | Typical qPCR/dPCR amplicons are ~70–200 bp; 500 bp captures valid products while rejecting spurious long-range primer pairings.                                                                                                  |
 
 **Detection calls:**
 - `Detected` — valid amplicon found with probe contained within it (probe assays), or valid amplicon found (probe-free assays)
 - `Primer Only` — valid amplicon found but probe not detected within it
 - `Not Detected` — no valid amplicon found
 
-**Interpreting `Primer Only`:** both primers bind and would amplify, but the probe site is diverged or absent. For a hydrolysis-probe (ddPCR/qPCR) assay this usually means **no fluorescent signal** despite amplification, so `assay_performance.csv` counts it as a non-detection; for SYBR/probe-free chemistry any valid amplicon is a detection. `pct_detected_or_primer` in the summaries lets you see both interpretations.
+**Interpreting `Primer Only`:** both primers bind and would amplify, but the probe site is diverged or absent. For a hydrolysis-probe (dPCR/qPCR) assay this usually means **no fluorescent signal** despite amplification, so `assay_performance.csv` counts it as a non-detection; for SYBR/probe-free chemistry any valid amplicon is a detection. `pct_detected_or_primer` in the summaries lets you see both interpretations.
 
 The BLAST search itself is run with deliberately permissive settings
 (`evalue=1000`, `perc_identity=70`, `word_size=7`, tuned for short oligo
-queries) so that no candidate binding site is missed; stringency is enforced
+queries) to avoid candidate binding site being missed; stringency is enforced
 downstream by the mismatch, 3′-exact, and amplicon-size filters above.
 
 ---
@@ -397,7 +367,7 @@ whose denominator is zero is left blank rather than reported as `0` — e.g. a `
 that matches no assemblies yields `n_target = 0`, a blank `sensitivity`, and a warning in
 `run.log`.
 
-### Reading the numbers
+### Interpretation
 
 - **These are in silico predictions, not wet-lab performance.** They report whether the primers
   and probe have acceptable binding sites in each genome under the configured
